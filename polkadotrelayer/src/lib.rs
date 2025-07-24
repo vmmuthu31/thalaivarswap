@@ -300,14 +300,15 @@ mod polkadotrelayer {
         }
     }
 
-    #[cfg(test)]
+ #[cfg(test)]
     mod tests {
         use super::*;
+        use ink::env::DefaultEnvironment;
 
         #[ink::test]
         fn test_new_contract() {
             let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+            let accounts = ink::env::test::default_accounts();
             
             let receiver = accounts.bob;
             let hashlock = [1u8; 32];
@@ -315,8 +316,8 @@ mod polkadotrelayer {
             let swap_id = [2u8; 32];
             let source_chain = 1;
 
-            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
-            ink::env::test::set_value_transferred::<ink::env::DefaultEnvironment>(100u128);
+            ink::env::test::set_caller(accounts.alice);
+            ink::env::test::set_value_transferred(100u128.into());
 
             let result = htlc.new_contract(receiver, hashlock, timelock, swap_id, source_chain);
             assert!(result.is_ok());
@@ -328,7 +329,7 @@ mod polkadotrelayer {
         #[ink::test]
         fn test_withdraw() {
             let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
+            let accounts = ink::env::test::default_accounts();
             
             let receiver = accounts.bob;
             let preimage = [3u8; 32];
@@ -337,13 +338,13 @@ mod polkadotrelayer {
             let swap_id = [2u8; 32];
             let source_chain = 1;
 
-            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
-            ink::env::test::set_value_transferred::<ink::env::DefaultEnvironment>(100u128);
-            ink::env::test::set_block_number::<ink::env::DefaultEnvironment>(500);
+            ink::env::test::set_caller(accounts.alice);
+            ink::env::test::set_value_transferred(100u128.into());
+            ink::env::test::set_block_number::<DefaultEnvironment>(500);
 
             let contract_id = htlc.new_contract(receiver, hashlock, timelock, swap_id, source_chain).unwrap();
 
-            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(receiver);
+            ink::env::test::set_caller(receiver);
             let result = htlc.withdraw(contract_id, preimage);
             assert!(result.is_ok());
 
@@ -354,23 +355,27 @@ mod polkadotrelayer {
 
         #[ink::test]
         fn test_admin_functions() {
+            let accounts = ink::env::test::default_accounts();
+            
+            ink::env::test::set_caller(accounts.alice);
+            
             let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts::<ink::env::DefaultEnvironment>();
             
-            
-            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.alice);
-            let admin = htlc.get_admin();
-            assert_eq!(admin, accounts.alice);
+            let initial_admin = htlc.get_admin();
+            assert_eq!(initial_admin, accounts.alice, "Initial admin should be Alice");
 
-            
-            let result = htlc.update_admin(accounts.bob);
-            assert!(result.is_ok());
-            assert_eq!(htlc.get_admin(), accounts.bob);
+            let update_result = htlc.update_admin(accounts.bob);
+            assert!(update_result.is_ok(), "Admin update by Alice should succeed");
 
-            
-            ink::env::test::set_caller::<ink::env::DefaultEnvironment>(accounts.charlie);
-            let result = htlc.update_admin(accounts.charlie);
-            assert!(result.is_err());
+            let new_admin = htlc.get_admin();
+            assert_eq!(new_admin, accounts.bob, "New admin should be Bob");
+
+            ink::env::test::set_caller(accounts.charlie);
+            let unauthorized_update = htlc.update_admin(accounts.charlie);
+            assert!(unauthorized_update.is_err(), "Unauthorized admin update should fail");
+
+            let final_admin = htlc.get_admin();
+            assert_eq!(final_admin, accounts.bob, "Admin should still be Bob after failed update");
         }
     }
 }
