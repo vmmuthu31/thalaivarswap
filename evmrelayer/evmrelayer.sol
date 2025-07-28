@@ -6,17 +6,18 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/**
- * @title EVMRelayer
- * @dev Ethereum-side HTLC contract for 1inch Fusion+ cross-chain swaps
- */
-contract EVMRelayer is ReentrancyGuard, Ownable {
+contract EthereumHTLC is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
+    constructor(address initialOwner) Ownable(initialOwner) {
+        // Constructor logic if needed
+    }
+
+    // Rest of the contract code remains the same
     struct LockContract {
         address sender;
         address receiver;
-        address token;
+        address token; // address(0) for ETH
         uint256 amount;
         bytes32 hashlock;
         uint256 timelock;
@@ -24,15 +25,22 @@ contract EVMRelayer is ReentrancyGuard, Ownable {
         bool refunded;
         bytes32 preimage;
         bytes32 swapId;
-        uint32 destinationChain;
+        uint32 sourceChain;
+        uint32 destChain;
+        uint256 destAmount;
+        uint256 fee;
+        address relayer;
     }
 
     mapping(bytes32 => LockContract) public contracts;
-    mapping(address => bool) public authorizedResolvers;
-    
-    address public fusionRouter;
-    uint256 public resolverFee; 
-    
+    mapping(address => bool) public authorizedRelayers;
+
+    uint256 public contractCounter;
+    uint16 public protocolFeeBps = 30; // 0.3%
+    uint256 public protocolFees;
+    uint256 public minTimelock = 1 hours;
+    uint256 public maxTimelock = 24 hours;
+
     event HTLCNew(
         bytes32 indexed contractId,
         address indexed sender,
@@ -41,355 +49,275 @@ contract EVMRelayer is ReentrancyGuard, Ownable {
         uint256 amount,
         bytes32 hashlock,
         uint256 timelock,
-        bytes32 swapId
+        bytes32 swapId,
+        uint32 sourceChain,
+        uint32 destChain,
+        uint256 destAmount,
+        address relayer
     );
-    
+
     event HTLCWithdraw(
         bytes32 indexed contractId,
-        bytes32 indexed secret
+        bytes32 indexed secret,
+        address indexed relayer
     );
-    
+
     event HTLCRefund(bytes32 indexed contractId);
-    
-    event ResolverAuthorized(address indexed resolver, bool authorized);
-    
-    event FusionOrderFilled(
-        bytes32 indexed swapId,
-        address indexed resolver,
-        uint256 fee
+
+    event RelayerRegistered(
+        bytes32 indexed contractId,
+        address indexed relayer
     );
 
-    modifier onlyAuthorizedResolver() {
-        require(authorizedResolvers[msg.sender], "Unauthorized resolver");
+    error ContractAlreadyExists();
+    error ContractNotFound();
+    error InvalidTimelock();
+    error InsufficientFunds();
+    error UnauthorizedWithdraw();
+    error UnauthorizedRefund();
+    error InvalidHashlock();
+    error AlreadyProcessed();
+    error TimelockNotExpired();
+    error TimelockExpired();
+    error TransferFailed();
+    error InvalidChainId();
+    error RelayerAlreadySet();
+    error TimelockTooShort();
+    error TimelockTooLong();
+    error InvalidFee();
+
+    modifier validTimelock(uint256 timelock) {
+        if (timelock <= block.timestamp) revert InvalidTimelock();
+        if (timelock < block.timestamp + minTimelock) revert TimelockTooShort();
+        if (timelock > block.timestamp + maxTimelock) revert TimelockTooLong();
         _;
     }
 
-    modifier contractExists(bytes32 _contractId) {
-        require(haveContract(_contractId), "Contract does not exist");
-        _;
-    }
+    /// @notice Create new HTLC for cross-chain swap
+    function newContract(
+        address receiver,
+        address token,
+        uint256 amount,
+        bytes32 hashlock,
+        uint256 timelock,
+        bytes32 swapId,
+        uint32 sourceChain,
+        uint32 destChain,
+        uint256 destAmount
+    ) external payable validTimelock(timelock) nonReentrant returns (bytes32) {
+        if (sourceChain == destChain) revert InvalidChainId();
 
-    modifier futureTimelock(uint256 _time) {
-        require(_time > block.timestamp, "Timelock must be in future");
-        _;
-    }
+        uint256 totalAmount;
+        if (token == address(0)) {
+            // ETH transfer
+            totalAmount = msg.value;
+            if (totalAmount == 0) revert InsufficientFunds();
+        } else {
+            // ERC20 transfer
+            if (amount == 0) revert InsufficientFunds();
+            totalAmount = amount;
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        }
 
-    modifier withdrawable(bytes32 _contractId) {
-        LockContract storage c = contracts[_contractId];
-        require(c.receiver == msg.sender, "Not authorized to withdraw");
-        require(!c.withdrawn, "Already withdrawn");
-        require(!c.refunded, "Already refunded");
-        require(c.timelock > block.timestamp, "Timelock expired");
-        _;
-    }
+        // Calculate protocol fee
+        uint256 fee = (totalAmount * protocolFeeBps) / 10000;
+        uint256 netAmount = totalAmount - fee;
 
-    modifier refundable(bytes32 _contractId) {
-        LockContract storage c = contracts[_contractId];
-        require(c.sender == msg.sender, "Not authorized to refund");
-        require(!c.withdrawn, "Already withdrawn");
-        require(!c.refunded, "Already refunded");
-        require(c.timelock <= block.timestamp, "Timelock not expired");
-        _;
-    }
-
-    constructor(address _fusionRouter, uint256 _resolverFee, address _initialOwner) Ownable(_initialOwner) {
-        fusionRouter = _fusionRouter;
-        resolverFee = _resolverFee;
-    }
-
-    /**
-     * @dev Create a new HTLC for ERC20 tokens
-     */
-    function newERC20Contract(
-        address _receiver,
-        address _token,
-        uint256 _amount,
-        bytes32 _hashlock,
-        uint256 _timelock,
-        bytes32 _swapId,
-        uint32 _destinationChain
-    ) external futureTimelock(_timelock) returns (bytes32 contractId) {
-        require(_amount > 0, "Amount must be greater than 0");
-        require(_token != address(0), "Invalid token address");
-        
-        contractId = keccak256(
-            abi.encodePacked(
-                msg.sender,
-                _receiver,
-                _token,
-                _amount,
-                _hashlock,
-                _timelock,
-                _swapId,
-                block.timestamp
-            )
+        bytes32 contractId = generateContractId(
+            msg.sender,
+            receiver,
+            token,
+            netAmount,
+            hashlock,
+            timelock,
+            swapId
         );
-        
-        require(!haveContract(contractId), "Contract already exists");
-        
-        IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
-        
+
+        if (contracts[contractId].sender != address(0)) {
+            revert ContractAlreadyExists();
+        }
+
         contracts[contractId] = LockContract({
             sender: msg.sender,
-            receiver: _receiver,
-            token: _token,
-            amount: _amount,
-            hashlock: _hashlock,
-            timelock: _timelock,
+            receiver: receiver,
+            token: token,
+            amount: netAmount,
+            hashlock: hashlock,
+            timelock: timelock,
             withdrawn: false,
             refunded: false,
-            preimage: 0x0,
-            swapId: _swapId,
-            destinationChain: _destinationChain
+            preimage: bytes32(0),
+            swapId: swapId,
+            sourceChain: sourceChain,
+            destChain: destChain,
+            destAmount: destAmount,
+            fee: fee,
+            relayer: address(0)
         });
-        
+
+        protocolFees += fee;
+
         emit HTLCNew(
             contractId,
             msg.sender,
-            _receiver,
-            _token,
-            _amount,
-            _hashlock,
-            _timelock,
-            _swapId
+            receiver,
+            token,
+            netAmount,
+            hashlock,
+            timelock,
+            swapId,
+            sourceChain,
+            destChain,
+            destAmount,
+            address(0)
         );
+
+        return contractId;
     }
 
-    /**
-     * @dev Create a new HTLC for ETH
-     */
-    function newETHContract(
-        address _receiver,
-        bytes32 _hashlock,
-        uint256 _timelock,
-        bytes32 _swapId,
-        uint32 _destinationChain
-    ) external payable futureTimelock(_timelock) returns (bytes32 contractId) {
-        require(msg.value > 0, "Must send ETH");
-        
-        contractId = keccak256(
-            abi.encodePacked(
-                msg.sender,
-                _receiver,
-                address(0), 
-                msg.value,
-                _hashlock,
-                _timelock,
-                _swapId,
-                block.timestamp
-            )
-        );
-        
-        require(!haveContract(contractId), "Contract already exists");
-        
-        contracts[contractId] = LockContract({
-            sender: msg.sender,
-            receiver: _receiver,
-            token: address(0),
-            amount: msg.value,
-            hashlock: _hashlock,
-            timelock: _timelock,
-            withdrawn: false,
-            refunded: false,
-            preimage: 0x0,
-            swapId: _swapId,
-            destinationChain: _destinationChain
-        });
-        
-        emit HTLCNew(
-            contractId,
-            msg.sender,
-            _receiver,
-            address(0),
-            msg.value,
-            _hashlock,
-            _timelock,
-            _swapId
-        );
+    /// @notice Register relayer for specific swap
+    function registerRelayer(bytes32 contractId) external {
+        LockContract storage lock = contracts[contractId];
+        if (lock.sender == address(0)) revert ContractNotFound();
+        if (lock.relayer != address(0)) revert RelayerAlreadySet();
+
+        lock.relayer = msg.sender;
+
+        emit RelayerRegistered(contractId, msg.sender);
     }
 
-    /**
-     * @dev Withdraw funds by revealing the preimage
-     */
-    function withdraw(
-        bytes32 _contractId,
-        bytes32 _preimage
-    ) 
-        external 
-        contractExists(_contractId) 
-        withdrawable(_contractId) 
-        nonReentrant 
+    /// @notice Withdraw funds using preimage
+    function withdraw(bytes32 contractId, bytes32 preimage)
+        external
+        nonReentrant
     {
-        LockContract storage c = contracts[_contractId];
-        
-        require(
-            sha256(abi.encodePacked(_preimage)) == c.hashlock,
-            "Hashlock mismatch"
-        );
-        
-        c.preimage = _preimage;
-        c.withdrawn = true;
-        
-        if (c.token == address(0)) {
-            (bool success, ) = c.receiver.call{value: c.amount}("");
-            require(success, "ETH transfer failed");
-        } else {
-            IERC20(c.token).safeTransfer(c.receiver, c.amount);
+        LockContract storage lock = contracts[contractId];
+
+        if (lock.sender == address(0)) revert ContractNotFound();
+        if (msg.sender != lock.receiver && msg.sender != lock.relayer) {
+            revert UnauthorizedWithdraw();
         }
-        
-        emit HTLCWithdraw(_contractId, _preimage);
+        if (lock.withdrawn || lock.refunded) revert AlreadyProcessed();
+        if (block.timestamp >= lock.timelock) revert TimelockExpired();
+        if (sha256(abi.encodePacked(preimage)) != lock.hashlock) {
+            revert InvalidHashlock();
+        }
+
+        lock.withdrawn = true;
+        lock.preimage = preimage;
+
+        // Transfer funds
+        if (lock.token == address(0)) {
+            // ETH transfer
+            (bool success, ) = lock.receiver.call{value: lock.amount}("");
+            if (!success) revert TransferFailed();
+        } else {
+            // ERC20 transfer
+            IERC20(lock.token).safeTransfer(lock.receiver, lock.amount);
+        }
+
+        emit HTLCWithdraw(contractId, preimage, lock.relayer);
     }
 
-    /**
-     * @dev Refund tokens after timelock expiry
-     */
-    function refund(bytes32 _contractId) 
-        external 
-        contractExists(_contractId) 
-        refundable(_contractId) 
-        nonReentrant 
-    {
-        LockContract storage c = contracts[_contractId];
-        c.refunded = true;
-        
-        if (c.token == address(0)) {
-            (bool success, ) = c.sender.call{value: c.amount}("");
-            require(success, "ETH transfer failed");
+    /// @notice Refund sender after timelock expires
+    function refund(bytes32 contractId) external nonReentrant {
+        LockContract storage lock = contracts[contractId];
+
+        if (lock.sender == address(0)) revert ContractNotFound();
+        if (msg.sender != lock.sender) revert UnauthorizedRefund();
+        if (lock.withdrawn || lock.refunded) revert AlreadyProcessed();
+        if (block.timestamp < lock.timelock) revert TimelockNotExpired();
+
+        lock.refunded = true;
+
+        // Transfer funds back to sender
+        if (lock.token == address(0)) {
+            // ETH transfer
+            (bool success, ) = lock.sender.call{value: lock.amount}("");
+            if (!success) revert TransferFailed();
         } else {
-            IERC20(c.token).safeTransfer(c.sender, c.amount);
+            // ERC20 transfer
+            IERC20(lock.token).safeTransfer(lock.sender, lock.amount);
         }
-        
-        emit HTLCRefund(_contractId);
+
+        emit HTLCRefund(contractId);
     }
 
-    /**
-     * @dev Fusion+ resolver function - withdraw on behalf of receiver
-     */
-    function resolverWithdraw(
-        bytes32 _contractId,
-        bytes32 _preimage,
-        address _feeRecipient
-    ) 
-        external 
-        onlyAuthorizedResolver
-        contractExists(_contractId) 
-        nonReentrant 
-    {
-        LockContract storage c = contracts[_contractId];
-        
-        require(!c.withdrawn && !c.refunded, "Already processed");
-        require(c.timelock > block.timestamp, "Timelock expired");
-        require(
-            sha256(abi.encodePacked(_preimage)) == c.hashlock,
-            "Hashlock mismatch"
-        );
-        
-        c.preimage = _preimage;
-        c.withdrawn = true;
-        
-        uint256 fee = (c.amount * resolverFee) / 10000;
-        uint256 receiverAmount = c.amount - fee;
-        
-        if (c.token == address(0)) {
-            (bool success1, ) = c.receiver.call{value: receiverAmount}("");
-            require(success1, "ETH transfer to receiver failed");
-            
-            if (fee > 0) {
-                (bool success2, ) = _feeRecipient.call{value: fee}("");
-                require(success2, "ETH transfer to resolver failed");
-            }
-        } else {
-            IERC20(c.token).safeTransfer(c.receiver, receiverAmount);
-            if (fee > 0) {
-                IERC20(c.token).safeTransfer(_feeRecipient, fee);
-            }
-        }
-        
-        emit HTLCWithdraw(_contractId, _preimage);
-        emit FusionOrderFilled(c.swapId, msg.sender, fee);
-    }
-
-    /**
-     * @dev Get contract details
-     */
-    function getContract(bytes32 _contractId)
+    /// @notice Get contract details
+    function getContract(bytes32 contractId)
         external
         view
-        returns (
-            address sender,
-            address receiver,
-            address token,
-            uint256 amount,
-            bytes32 hashlock,
-            uint256 timelock,
-            bool withdrawn,
-            bool refunded,
-            bytes32 preimage,
-            bytes32 swapId
-        )
+        returns (LockContract memory)
     {
-        if (!haveContract(_contractId)) {
-            return (address(0), address(0), address(0), 0, 0, 0, false, false, 0, 0);
+        return contracts[contractId];
+    }
+
+    /// @notice Check if contract exists
+    function contractExists(bytes32 contractId) external view returns (bool) {
+        return contracts[contractId].sender != address(0);
+    }
+
+    /// @notice Get revealed secret
+    function getSecret(bytes32 contractId) external view returns (bytes32) {
+        return contracts[contractId].preimage;
+    }
+
+    /// @notice Admin functions
+    function updateProtocolFee(uint16 newFeeBps) external onlyOwner {
+        if (newFeeBps > 1000) revert InvalidFee(); // Max 10%
+        protocolFeeBps = newFeeBps;
+    }
+
+    function withdrawProtocolFees() external onlyOwner {
+        uint256 fees = protocolFees;
+        if (fees == 0) revert InsufficientFunds();
+
+        protocolFees = 0;
+        (bool success, ) = owner().call{value: fees}("");
+        if (!success) {
+            protocolFees = fees; // Restore on failure
+            revert TransferFailed();
         }
-        
-        LockContract storage c = contracts[_contractId];
-        return (
-            c.sender,
-            c.receiver,
-            c.token,
-            c.amount,
-            c.hashlock,
-            c.timelock,
-            c.withdrawn,
-            c.refunded,
-            c.preimage,
-            c.swapId
-        );
     }
 
-    /**
-     * @dev Check if contract exists
-     */
-    function haveContract(bytes32 _contractId) internal view returns (bool exists) {
-        exists = (contracts[_contractId].sender != address(0));
+    function updateTimelockLimits(uint256 minTime, uint256 maxTime)
+        external
+        onlyOwner
+    {
+        minTimelock = minTime;
+        maxTimelock = maxTime;
     }
 
-    /**
-     * @dev Get revealed secret
-     */
-    function getSecret(bytes32 _contractId) external view returns (bytes32) {
-        return contracts[_contractId].preimage;
+    /// @notice Internal function to generate contract ID
+    function generateContractId(
+        address sender,
+        address receiver,
+        address token,
+        uint256 amount,
+        bytes32 hashlock,
+        uint256 timelock,
+        bytes32 swapId
+    ) internal returns (bytes32) {
+        contractCounter++;
+        return keccak256(abi.encodePacked(
+            sender,
+            receiver,
+            token,
+            amount,
+            hashlock,
+            timelock,
+            swapId,
+            contractCounter,
+            block.chainid
+        ));
     }
 
-    /**
-     * @dev Admin function to authorize resolvers
-     */
-    function authorizeResolver(address _resolver, bool _authorized) external onlyOwner {
-        authorizedResolvers[_resolver] = _authorized;
-        emit ResolverAuthorized(_resolver, _authorized);
+    /// @notice View functions
+    function getProtocolFeeBps() external view returns (uint16) {
+        return protocolFeeBps;
     }
 
-    /**
-     * @dev Admin function to update resolver fee
-     */
-    function setResolverFee(uint256 _fee) external onlyOwner {
-        require(_fee <= 1000, "Fee too high");
-        resolverFee = _fee;
-    }
-
-    /**
-     * @dev Emergency function to withdraw stuck tokens
-     */
-    function emergencyWithdraw(
-        address _token,
-        uint256 _amount,
-        address _to
-    ) external onlyOwner {
-        if (_token == address(0)) {
-            (bool success, ) = _to.call{value: _amount}("");
-            require(success, "ETH transfer failed");
-        } else {
-            IERC20(_token).safeTransfer(_to, _amount);
-        }
+    function getProtocolFees() external view returns (uint256) {
+        return protocolFees;
     }
 }
