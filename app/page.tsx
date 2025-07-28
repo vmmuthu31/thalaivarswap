@@ -64,7 +64,7 @@ export default function HomePage() {
             </Link>
 
             <div className="text-sm text-gray-500">
-              <p>🚨 Testnet Demo - Use Sepolia ETH and Rococo DOT only</p>
+              <p>🚨 Testnet Demo - Use Sepolia ETH and Paseo DOT only</p>
             </div>
           </div>
         </div>

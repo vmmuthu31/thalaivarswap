@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ApiPromise, WsProvider, Keyring } from "@polkadot/api";
+import { ApiPromise, WsProvider } from "@polkadot/api";
 import { ContractPromise } from "@polkadot/api-contract";
-import { ethers } from "ethers";
+import { Keyring } from "@polkadot/keyring";
+import { cryptoWaitReady } from "@polkadot/util-crypto";
 import { EventEmitter } from "events";
+import { ethers } from "ethers";
 import axios from "axios";
 import contractMetadata from "./polkadotrelayer.json";
 // Types
@@ -41,22 +43,23 @@ export class CrossChainRelayer extends EventEmitter {
   private ethereumProvider: ethers.Provider;
   private ethereumSigner: ethers.Wallet;
   private polkadotContract: ContractPromise | null = null;
-  private ethereumContract: ethers.Contract;
-  private keyring: Keyring;
+  private ethereumContract!: ethers.Contract;
+  private keyring!: Keyring;
   private polkadotAccount: any;
 
   // Configuration
   private config = {
     polkadot: {
-      endpoint: "wss://rpc1.paseo.popnetwork.xyz",
+      endpoint:
+        process.env.POLKADOT_WS_URL || "wss://testnet-passet-hub.polkadot.io",
       contractAddress: process.env.POLKADOT_CONTRACT_ADDRESS || "",
-      seedPhrase: process.env.POLKADOT_SEED_PHRASE || "",
+      seedPhrase: process.env.POLKADOT_SEED || "//Alice",
     },
     ethereum: {
       rpcUrl:
-        process.env.ETHEREUM_RPC_URL || "https://sepolia.infura.io/v3/YOUR_KEY",
-      contractAddress: process.env.ETHEREUM_CONTRACT_ADDRESS || "",
-      privateKey: process.env.ETHEREUM_PRIVATE_KEY || "",
+        process.env.ETH_RPC_URL || "https://sepolia.infura.io/v3/YOUR_KEY",
+      contractAddress: process.env.ETH_CONTRACT_ADDRESS || "",
+      privateKey: process.env.ETH_PRIVATE_KEY || "",
     },
     oneInch: {
       apiUrl: "https://api.1inch.dev/fusion-plus",
@@ -93,13 +96,42 @@ export class CrossChainRelayer extends EventEmitter {
       this.ethereumProvider
     );
 
-    // Initialize Polkadot keyring
+    // Initialize Polkadot keyring (async)
+    this.initializePolkadot().catch(console.error);
+  }
+
+  private async initializePolkadot() {
+    await cryptoWaitReady();
     this.keyring = new Keyring({ type: "sr25519" });
     this.polkadotAccount = this.keyring.addFromUri(
       this.config.polkadot.seedPhrase
     );
+  }
 
-    // Ethereum contract ABI (simplified)
+  async initialize(): Promise<void> {
+    console.log("🚀 Initializing Cross-Chain Relayer...");
+
+    // Wait for Polkadot initialization
+    await this.initializePolkadot();
+
+    // Connect to Polkadot
+    const wsProvider = new WsProvider(this.config.polkadot.endpoint);
+    this.polkadotApi = await ApiPromise.create({
+      provider: wsProvider,
+      types: {
+        Address: "H160",
+        LookupSource: "H160",
+      },
+    });
+
+    // Load contract metadata
+    this.polkadotContract = new ContractPromise(
+      this.polkadotApi,
+      contractMetadata,
+      this.config.polkadot.contractAddress
+    );
+
+    // Initialize Ethereum contract
     const ethereumABI = [
       "event HTLCNew(bytes32 indexed contractId, address indexed sender, address indexed receiver, address token, uint256 amount, bytes32 hashlock, uint256 timelock, bytes32 swapId, uint32 sourceChain, uint32 destChain, uint256 destAmount, address relayer)",
       "event HTLCWithdraw(bytes32 indexed contractId, bytes32 indexed secret, address indexed relayer)",
@@ -114,21 +146,6 @@ export class CrossChainRelayer extends EventEmitter {
       this.config.ethereum.contractAddress,
       ethereumABI,
       this.ethereumSigner
-    );
-  }
-
-  async initialize(): Promise<void> {
-    console.log("🚀 Initializing Cross-Chain Relayer...");
-
-    // Connect to Polkadot
-    const wsProvider = new WsProvider(this.config.polkadot.endpoint);
-    this.polkadotApi = await ApiPromise.create({ provider: wsProvider });
-
-    // Load contract metadata (you'll need to provide this)
-    this.polkadotContract = new ContractPromise(
-      this.polkadotApi,
-      contractMetadata,
-      this.config.polkadot.contractAddress
     );
 
     // Start event listeners

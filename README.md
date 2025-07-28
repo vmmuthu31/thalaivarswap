@@ -12,7 +12,7 @@ A comprehensive bidirectional cross-chain swap system enabling secure ETH ↔ DO
 - **⚡ Event-driven Architecture**: Real-time event processing and status synchronization
 - **🛡️ Production Security**: Secret coordination, timelock management, and error recovery
 - **🧪 Demo Ready**: Complete end-to-end demonstration capabilities
-- **🌐 Multi-testnet Support**: Deployed on Ethereum Sepolia and Polkadot Rococo
+- **🌐 Multi-testnet Support**: Deployed on Ethereum Sepolia and Polkadot Paseo
 
 ## 🏗️ Implementation Architecture
 
@@ -25,7 +25,7 @@ A comprehensive bidirectional cross-chain swap system enabling secure ETH ↔ DO
 │                                                                                 │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
 │  │   Ethereum      │    │  Bidirectional  │    │   Polkadot      │             │
-│  │   (Sepolia)     │◄──►│    Relayer      │◄──►│   (Rococo)      │             │
+│  │   (Sepolia)     │◄──►│    Relayer      │◄──►│   (Paseo)      │             │
 │  │                 │    │                 │    │                 │             │
 │  │ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │             │
 │  │ │ EVM HTLC    │ │    │ │ Dutch       │ │    │ │ ink! HTLC   │ │             │
@@ -349,7 +349,7 @@ ETH_PRIVATE_KEY=your_ethereum_private_key
 ETH_CONTRACT_ADDRESS=0x...  # Deployed EVM relayer contract
 
 # Polkadot Configuration
-POLKADOT_WS_URL=wss://rococo-rpc.polkadot.io
+POLKADOT_WS_URL=wss://Paseo-rpc.polkadot.io
 POLKADOT_SEED=//Alice
 POLKADOT_CONTRACT_ADDRESS=5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
 
@@ -546,7 +546,7 @@ relayer.on("metrics-update", (metrics) => {
 
 ### 🔄 Next Steps
 
-- **Contract deployment** to Sepolia and Rococo testnets
+- **Contract deployment** to Sepolia and Paseo testnets
 - **Integration test suite** for automated testing
 - **Performance optimization** and gas cost reduction
 - **UI/UX interface** for user-friendly interactions

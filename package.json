@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "demo:complete": "npx ts-node scripts/complete-cross-chain-demo.ts",
+    "demo:complete": "npx ts-node --project tsconfig.node.json scripts/complete-cross-chain-demo.ts",
     "demo:eth-to-dot": "npx ts-node scripts/demo-eth-to-dot.ts",
     "demo:dot-to-eth": "npx ts-node scripts/demo-dot-to-eth.ts",
     "deploy:contracts": "npx ts-node scripts/deploy-contracts.ts"
