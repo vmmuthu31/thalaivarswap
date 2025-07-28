@@ -1,3 +1,5 @@
+#![no_std]
+
 [package]
 name = "polkadotrelayer"
 version = "0.1.0"
@@ -7,13 +9,13 @@ edition = "2021"
 [dependencies]
 ink = { version = "6.0.0-alpha", default-features = false, features = ["unstable-hostfn"] }
 scale = { package = "parity-scale-codec", version = "3", default-features = false, features = ["derive"] }
-scale-info = { version = "2.11", default-features = false, features = ["derive"], optional = true }
+scale-info = { version = "2.11", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 ink_e2e = "6.0.0-alpha"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
 
 [features]
 default = ["std"]
@@ -24,6 +26,3 @@ std = [
 ]
 ink-as-dependency = []
 e2e-tests = []
-
-
-
