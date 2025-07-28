@@ -7,22 +7,30 @@ mod polkadotrelayer {
     use scale::{Encode, Decode};
     use scale_info::TypeInfo;
 
-   
+
+    /// Cross-chain address representation
+    #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    pub enum CrossChainAddress {
+        Ethereum([u8; 20]),
+        Substrate([u8; 32]),
+        Raw(Vec<u8>),
+    }
+
     #[ink(storage)]
     pub struct FusionHtlc {
         contracts: Mapping<[u8; 32], LockContract>,
         contract_counter: u64,
         admin: Address,
-        /// Fee collected by the protocol (in basis points, e.g., 30 = 0.3%)
+        /// Use H160 as key for address mappings
+        address_mappings: Mapping<Address, CrossChainAddress>,
         protocol_fee_bps: u16,
-        /// Accumulated protocol fees
         protocol_fees: Balance,
-        /// Minimum timelock duration (in blocks)
         min_timelock: BlockNumber,
-        /// Maximum timelock duration (in blocks) 
         max_timelock: BlockNumber,
     }
 
+    /// Contract data with H160 addresses
     #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
     #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
     pub struct LockContract {
@@ -36,14 +44,19 @@ mod polkadotrelayer {
         pub preimage: Option<[u8; 32]>,
         pub swap_id: [u8; 32],
         pub source_chain: u32,
-        /// The destination chain for this swap
         pub dest_chain: u32,
-        /// The expected amount on destination chain
         pub dest_amount: Balance,
-        /// Fee for this specific swap
         pub fee: Balance,
-        /// Relayer responsible for this swap
         pub relayer: Option<Address>,
+        pub sender_cross_address: Option<Vec<u8>>,
+        pub receiver_cross_address: Option<Vec<u8>>,
+    }
+
+    #[ink(event)]
+    pub struct AddressMapped {
+        #[ink(topic)]
+        account: Address,
+        cross_address: CrossChainAddress,
     }
 
     #[ink(event)]
@@ -61,7 +74,6 @@ mod polkadotrelayer {
         source_chain: u32,
         dest_chain: u32,
         dest_amount: Balance,
-        relayer: Option<Address>,
     }
 
     #[ink(event)]
@@ -70,7 +82,6 @@ mod polkadotrelayer {
         contract_id: [u8; 32],
         #[ink(topic)]
         secret: [u8; 32],
-        #[ink(topic)]
         relayer: Option<Address>,
     }
 
@@ -80,7 +91,6 @@ mod polkadotrelayer {
         contract_id: [u8; 32],
     }
 
-    /// Event emitted when a relayer registers for a swap
     #[ink(event)]
     pub struct RelayerRegistered {
         #[ink(topic)]
@@ -102,13 +112,13 @@ mod polkadotrelayer {
         TimelockNotExpired,
         TimelockExpired,
         TransferFailed,
-        ConversionError,
         InvalidFee,
         InvalidChainId,
         RelayerAlreadySet,
-        UnauthorizedRelayer,
         TimelockTooShort,
         TimelockTooLong,
+        Unauthorized,
+        ConversionError,
     }
 
     impl FusionHtlc {
@@ -118,14 +128,29 @@ mod polkadotrelayer {
                 contracts: Mapping::default(),
                 contract_counter: 0,
                 admin: Self::env().caller(),
-                protocol_fee_bps: 30, // 0.3% default fee
+                address_mappings: Mapping::default(),
+                protocol_fee_bps: 30,
                 protocol_fees: 0,
-                min_timelock: 100,    // ~10 minutes (assuming 6s blocks)
-                max_timelock: 14400,  // ~24 hours
+                min_timelock: 100,
+                max_timelock: 14400,
             }
         }
 
-        /// Create a new HTLC for cross-chain swap
+        /// Map cross-chain address for account
+        #[ink(message)]
+        pub fn map_address(&mut self, cross_address: CrossChainAddress) -> Result<(), Error> {
+            let caller = self.env().caller();
+            self.address_mappings.insert(caller, &cross_address);
+            
+            self.env().emit_event(AddressMapped {
+                account: caller,
+                cross_address,
+            });
+            
+            Ok(())
+        }
+
+        /// Create new HTLC contract with receiver as H160
         #[ink(message)]
         #[ink(payable)]
         pub fn new_contract(
@@ -137,15 +162,212 @@ mod polkadotrelayer {
             source_chain: u32,
             dest_chain: u32,
             dest_amount: Balance,
+            sender_cross_address: Option<Vec<u8>>,
+            receiver_cross_address: Option<Vec<u8>>,
         ) -> Result<[u8; 32], Error> {
             let sender = self.env().caller();
-            let amount = self.env().transferred_value();
-            let current_block = self.env().block_number();
+            let amount = self.get_transferred_balance()?;
+            
+            self.validate_contract_params(timelock, source_chain, dest_chain)?;
+            
+            let (net_amount, fee) = self.calculate_fees(amount);
+            
+            let contract_id = self.generate_contract_id(
+                &sender,
+                &receiver,
+                net_amount,
+                &hashlock,
+                timelock,
+                &swap_id,
+            );
 
-            // Validation
+            if self.contracts.contains(&contract_id) {
+                return Err(Error::ContractAlreadyExists);
+            }
+
+            let contract = LockContract {
+                sender,
+                receiver,
+                amount: net_amount,
+                hashlock,
+                timelock,
+                withdrawn: false,
+                refunded: false,
+                preimage: None,
+                swap_id,
+                source_chain,
+                dest_chain,
+                dest_amount,
+                fee,
+                relayer: None,
+                sender_cross_address,
+                receiver_cross_address,
+            };
+
+            self.contracts.insert(&contract_id, &contract);
+            self.protocol_fees += fee;
+            self.emit_htlc_new_event(&contract_id, &contract);
+
+            Ok(contract_id)
+        }
+
+        #[ink(message)]
+        pub fn register_relayer(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            let mut contract = self.get_contract_or_error(&contract_id)?;
+
+            if contract.relayer.is_some() {
+                return Err(Error::RelayerAlreadySet);
+            }
+
+            contract.relayer = Some(caller);
+            self.contracts.insert(&contract_id, &contract);
+
+            self.env().emit_event(RelayerRegistered {
+                contract_id,
+                relayer: caller,
+            });
+
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn withdraw(
+            &mut self,
+            contract_id: [u8; 32],
+            preimage: [u8; 32],
+        ) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            let mut contract = self.validate_withdrawal_auth(&contract_id, &caller)?;
+            self.validate_withdrawal_timing(&contract)?;
+            self.validate_preimage(&contract, &preimage)?;
+
+            contract.withdrawn = true;
+            contract.preimage = Some(preimage);
+            self.contracts.insert(&contract_id, &contract);
+
+            self.execute_transfer(contract.receiver, contract.amount)?;
+
+            self.env().emit_event(HTLCWithdraw {
+                contract_id,
+                secret: preimage,
+                relayer: contract.relayer,
+            });
+
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn refund(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
+            let caller = self.env().caller();
+            
+            let mut contract = self.validate_refund_auth(&contract_id, &caller)?;
+            self.validate_refund_timing(&contract)?;
+
+            contract.refunded = true;
+            self.contracts.insert(&contract_id, &contract);
+
+            self.execute_transfer(contract.sender, contract.amount)?;
+
+            self.env().emit_event(HTLCRefund { contract_id });
+
+            Ok(())
+        }
+
+        // View functions
+        #[ink(message)]
+        pub fn get_contract(&self, contract_id: [u8; 32]) -> Option<LockContract> {
+            self.contracts.get(&contract_id)
+        }
+
+        #[ink(message)]
+        pub fn contract_exists(&self, contract_id: [u8; 32]) -> bool {
+            self.contracts.contains(&contract_id)
+        }
+
+        #[ink(message)]
+        pub fn get_secret(&self, contract_id: [u8; 32]) -> Option<[u8; 32]> {
+            self.contracts.get(&contract_id)
+                .and_then(|contract| contract.preimage)
+        }
+
+        #[ink(message)]
+        pub fn get_cross_address(&self, account: Address) -> Option<CrossChainAddress> {
+            self.address_mappings.get(&account)
+        }
+
+        #[ink(message)]
+        pub fn get_admin(&self) -> Address {
+            self.admin
+        }
+
+        #[ink(message)]
+        pub fn get_protocol_fee_bps(&self) -> u16 {
+            self.protocol_fee_bps
+        }
+
+        #[ink(message)]
+        pub fn get_protocol_fees(&self) -> Balance {
+            self.protocol_fees
+        }
+
+        // Admin functions
+        #[ink(message)]
+        pub fn update_admin(&mut self, new_admin: Address) -> Result<(), Error> {
+            self.ensure_admin()?;
+            self.admin = new_admin;
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn update_protocol_fee(&mut self, new_fee_bps: u16) -> Result<(), Error> {
+            self.ensure_admin()?;
+            if new_fee_bps > 1000 {
+                return Err(Error::InvalidFee);
+            }
+            self.protocol_fee_bps = new_fee_bps;
+            Ok(())
+        }
+
+        #[ink(message)]
+        pub fn withdraw_protocol_fees(&mut self) -> Result<(), Error> {
+            self.ensure_admin()?;
+            
+            let fees = self.protocol_fees;
+            if fees == 0 {
+                return Err(Error::InsufficientFunds);
+            }
+
+            self.protocol_fees = 0;
+            if let Err(_) = self.execute_transfer(self.admin, fees) {
+                self.protocol_fees = fees; // Restore on failure
+                return Err(Error::TransferFailed);
+            }
+
+            Ok(())
+        }
+
+        // Private helper functions - all under 25 lines, single responsibility
+
+        /// Get transferred value as Balance, ensuring non-zero amount
+        fn get_transferred_balance(&self) -> Result<Balance, Error> {
+            let amount = self.env().transferred_value();
             if amount == 0u128.into() {
                 return Err(Error::InsufficientFunds);
             }
+            amount.try_into().map_err(|_| Error::ConversionError)
+        }
+
+        /// Validate contract creation parameters
+        fn validate_contract_params(
+            &self,
+            timelock: BlockNumber,
+            source_chain: u32,
+            dest_chain: u32,
+        ) -> Result<(), Error> {
+            let current_block = self.env().block_number();
 
             if timelock <= current_block {
                 return Err(Error::InvalidTimelock);
@@ -163,100 +385,30 @@ mod polkadotrelayer {
                 return Err(Error::InvalidChainId);
             }
 
-            let amount_balance: Balance = self.convert_u256_to_balance(amount)?;
-            
-            // Calculate protocol fee
-            let fee = (amount_balance * self.protocol_fee_bps as u128) / 10000;
-            let net_amount = amount_balance - fee;
-
-            let contract_id = self.generate_contract_id(
-                &sender,
-                &receiver,
-                net_amount,
-                &hashlock,
-                timelock,
-                &swap_id,
-            );
-
-            if self.contracts.contains(&contract_id) {
-                return Err(Error::ContractAlreadyExists);
-            }
-
-            let lock_contract = LockContract {
-                sender,
-                receiver,
-                amount: net_amount,
-                hashlock,
-                timelock,
-                withdrawn: false,
-                refunded: false,
-                preimage: None,
-                swap_id,
-                source_chain,
-                dest_chain,
-                dest_amount,
-                fee,
-                relayer: None,
-            };
-
-            self.contracts.insert(&contract_id, &lock_contract);
-            self.protocol_fees += fee;
-
-            self.env().emit_event(HTLCNew {
-                contract_id,
-                sender,
-                receiver,
-                amount: net_amount,
-                hashlock,
-                timelock,
-                swap_id,
-                source_chain,
-                dest_chain,
-                dest_amount,
-                relayer: None,
-            });
-
-            Ok(contract_id)
-        }
-
-        /// Register a relayer for a specific swap
-        #[ink(message)]
-        pub fn register_relayer(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
-            let caller = self.env().caller();
-            
-            let mut contract = self.contracts.get(&contract_id)
-                .ok_or(Error::ContractNotFound)?;
-
-            if contract.relayer.is_some() {
-                return Err(Error::RelayerAlreadySet);
-            }
-
-            contract.relayer = Some(caller);
-            self.contracts.insert(&contract_id, &contract);
-
-            self.env().emit_event(RelayerRegistered {
-                contract_id,
-                relayer: caller,
-            });
-
             Ok(())
         }
 
-        /// Withdraw funds using the preimage (secret)
-        #[ink(message)]
-        pub fn withdraw(
-            &mut self,
-            contract_id: [u8; 32],
-            preimage: [u8; 32],
-        ) -> Result<(), Error> {
-            let caller = self.env().caller();
-            let current_block = self.env().block_number();
+        /// Calculate protocol fees from amount
+        fn calculate_fees(&self, amount: Balance) -> (Balance, Balance) {
+            let fee = (amount * self.protocol_fee_bps as u128) / 10000;
+            let net_amount = amount - fee;
+            (net_amount, fee)
+        }
 
-            let mut contract = self.contracts.get(&contract_id)
-                .ok_or(Error::ContractNotFound)?;
+        /// Get contract by ID or return error
+        fn get_contract_or_error(&self, contract_id: &[u8; 32]) -> Result<LockContract, Error> {
+            self.contracts.get(contract_id).ok_or(Error::ContractNotFound)
+        }
 
-            // Only receiver or registered relayer can withdraw
-            if contract.receiver != caller && contract.relayer != Some(caller) {
+        /// Validate withdrawal authorization
+        fn validate_withdrawal_auth(
+            &self,
+            contract_id: &[u8; 32],
+            caller: &Address,
+        ) -> Result<LockContract, Error> {
+            let contract = self.get_contract_or_error(contract_id)?;
+
+            if contract.receiver != *caller && contract.relayer.as_ref() != Some(caller) {
                 return Err(Error::UnauthorizedWithdraw);
             }
 
@@ -264,43 +416,27 @@ mod polkadotrelayer {
                 return Err(Error::AlreadyProcessed);
             }
 
+            Ok(contract)
+        }
+
+        /// Validate withdrawal timing (before timelock expires)
+        fn validate_withdrawal_timing(&self, contract: &LockContract) -> Result<(), Error> {
+            let current_block = self.env().block_number();
             if current_block >= contract.timelock {
                 return Err(Error::TimelockExpired);
             }
-
-            let hash = self.sha256(&preimage);
-            if hash != contract.hashlock {
-                return Err(Error::InvalidHashlock);
-            }
-
-            contract.withdrawn = true;
-            contract.preimage = Some(preimage);
-            self.contracts.insert(&contract_id, &contract);
-
-            let amount_u256 = self.convert_balance_to_u256(contract.amount);
-            if self.env().transfer(contract.receiver, amount_u256).is_err() {
-                return Err(Error::TransferFailed);
-            }
-
-            self.env().emit_event(HTLCWithdraw {
-                contract_id,
-                secret: preimage,
-                relayer: contract.relayer,
-            });
-
             Ok(())
         }
 
-        /// Refund the sender after timelock expires
-        #[ink(message)]
-        pub fn refund(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
-            let caller = self.env().caller();
-            let current_block = self.env().block_number();
+        /// Validate refund authorization
+        fn validate_refund_auth(
+            &self,
+            contract_id: &[u8; 32],
+            caller: &Address,
+        ) -> Result<LockContract, Error> {
+            let contract = self.get_contract_or_error(contract_id)?;
 
-            let mut contract = self.contracts.get(&contract_id)
-                .ok_or(Error::ContractNotFound)?;
-
-            if contract.sender != caller {
+            if contract.sender != *caller {
                 return Err(Error::UnauthorizedRefund);
             }
 
@@ -308,105 +444,63 @@ mod polkadotrelayer {
                 return Err(Error::AlreadyProcessed);
             }
 
+            Ok(contract)
+        }
+
+        /// Validate refund timing (after timelock expires)
+        fn validate_refund_timing(&self, contract: &LockContract) -> Result<(), Error> {
+            let current_block = self.env().block_number();
             if current_block < contract.timelock {
                 return Err(Error::TimelockNotExpired);
             }
-
-            contract.refunded = true;
-            self.contracts.insert(&contract_id, &contract);
-
-            let amount_u256 = self.convert_balance_to_u256(contract.amount);
-            if self.env().transfer(contract.sender, amount_u256).is_err() {
-                return Err(Error::TransferFailed);
-            }
-
-            self.env().emit_event(HTLCRefund { contract_id });
-
             Ok(())
         }
 
-        /// Get contract details
-        #[ink(message)]
-        pub fn get_contract(&self, contract_id: [u8; 32]) -> Option<LockContract> {
-            self.contracts.get(&contract_id)
-        }
-
-        /// Check if contract exists
-        #[ink(message)]
-        pub fn contract_exists(&self, contract_id: [u8; 32]) -> bool {
-            self.contracts.contains(&contract_id)
-        }
-
-        /// Get the secret if revealed
-        #[ink(message)]
-        pub fn get_secret(&self, contract_id: [u8; 32]) -> Option<[u8; 32]> {
-            self.contracts.get(&contract_id)
-                .and_then(|contract| contract.preimage)
-        }
-
-        /// Admin functions
-        #[ink(message)]
-        pub fn get_admin(&self) -> Address {
-            self.admin
-        }
-
-        #[ink(message)]
-        pub fn update_admin(&mut self, new_admin: Address) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::UnauthorizedWithdraw); 
+        /// Validate preimage matches hashlock
+        fn validate_preimage(
+            &self,
+            contract: &LockContract,
+            preimage: &[u8; 32],
+        ) -> Result<(), Error> {
+            let hash = self.compute_sha256(preimage);
+            if hash != contract.hashlock {
+                return Err(Error::InvalidHashlock);
             }
-            self.admin = new_admin;
             Ok(())
         }
 
-        #[ink(message)]
-        pub fn update_protocol_fee(&mut self, new_fee_bps: u16) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::UnauthorizedWithdraw);
+        /// Execute transfer with proper type conversion for ink! v6
+        fn execute_transfer(&self, to: Address, amount: Balance) -> Result<(), Error> {
+            let amount_u256: ink::primitives::U256 = amount.into();
+            self.env().transfer(to, amount_u256)
+                .map_err(|_| Error::TransferFailed)
+        }
+
+        /// Ensure caller is admin
+        fn ensure_admin(&self) -> Result<(), Error> {
+            if self.env().caller() != self.admin {
+                return Err(Error::Unauthorized);
             }
-            if new_fee_bps > 1000 { // Max 10%
-                return Err(Error::InvalidFee);
-            }
-            self.protocol_fee_bps = new_fee_bps;
             Ok(())
         }
 
-        #[ink(message)]
-        pub fn withdraw_protocol_fees(&mut self) -> Result<(), Error> {
-            let caller = self.env().caller();
-            if caller != self.admin {
-                return Err(Error::UnauthorizedWithdraw);
-            }
-            
-            let fees = self.protocol_fees;
-            if fees == 0 {
-                return Err(Error::InsufficientFunds);
-            }
-
-            self.protocol_fees = 0;
-            let amount_u256 = self.convert_balance_to_u256(fees);
-            if self.env().transfer(self.admin, amount_u256).is_err() {
-                self.protocol_fees = fees; // Restore on failure
-                return Err(Error::TransferFailed);
-            }
-
-            Ok(())
+        /// Emit HTLC creation event
+        fn emit_htlc_new_event(&self, contract_id: &[u8; 32], contract: &LockContract) {
+            self.env().emit_event(HTLCNew {
+                contract_id: *contract_id,
+                sender: contract.sender,
+                receiver: contract.receiver,
+                amount: contract.amount,
+                hashlock: contract.hashlock,
+                timelock: contract.timelock,
+                swap_id: contract.swap_id,
+                source_chain: contract.source_chain,
+                dest_chain: contract.dest_chain,
+                dest_amount: contract.dest_amount,
+            });
         }
 
-        /// View functions
-        #[ink(message)]
-        pub fn get_protocol_fee_bps(&self) -> u16 {
-            self.protocol_fee_bps
-        }
-
-        #[ink(message)]
-        pub fn get_protocol_fees(&self) -> Balance {
-            self.protocol_fees
-        }
-
-        /// Internal functions
+        /// Generate unique contract ID from parameters
         fn generate_contract_id(
             &mut self,
             sender: &Address,
@@ -427,88 +521,137 @@ mod polkadotrelayer {
             data.extend_from_slice(swap_id);
             data.extend_from_slice(&self.contract_counter.to_le_bytes());
 
-            self.sha256(&data)
+            self.compute_sha256(&data)
         }
 
-        fn sha256(&self, data: &[u8]) -> [u8; 32] {
+        /// Compute SHA256 hash
+        fn compute_sha256(&self, data: &[u8]) -> [u8; 32] {
             use ink::env::hash::{Sha2x256, HashOutput};
             let mut output = <Sha2x256 as HashOutput>::Type::default();
             ink::env::hash_bytes::<Sha2x256>(data, &mut output);
             output
-        }
-
-        fn convert_u256_to_balance(&self, amount: ink::primitives::U256) -> Result<Balance, Error> {
-            let amount_u128: u128 = amount.try_into().map_err(|_| Error::ConversionError)?;
-            Ok(amount_u128)
-        }
-
-        fn convert_balance_to_u256(&self, amount: Balance) -> ink::primitives::U256 {
-            amount.into()
         }
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
-        use ink::env::DefaultEnvironment;
+
+        type TestEnv = ink::env::DefaultEnvironment;
 
         #[ink::test]
-        fn test_enhanced_new_contract() {
-            let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts();
-            
-            let receiver = accounts.bob;
-            let hashlock = [1u8; 32];
-            let timelock = 1000;
-            let swap_id = [2u8; 32];
-            let source_chain = 1;
-            let dest_chain = 2;
-            let dest_amount = 90u128;
+        fn test_constructor_initializes_correctly() {
+            let htlc = FusionHtlc::new();
+            assert_eq!(htlc.get_protocol_fee_bps(), 30);
+            assert_eq!(htlc.get_protocol_fees(), 0);
+            assert_eq!(htlc.contract_counter, 0);
+        }
 
-            ink::env::test::set_caller(accounts.alice);
-            ink::env::test::set_value_transferred(100u128.into());
-            ink::env::test::set_block_number::<DefaultEnvironment>(100);
+        #[ink::test]
+        fn test_fee_calculation_accuracy() {
+            let htlc = FusionHtlc::new();
+            
+            // Test with 1000 units at 30 basis points (0.3%)
+            let (net_amount, fee) = htlc.calculate_fees(1000);
+            assert_eq!(fee, 3); // 1000 * 30 / 10000 = 3
+            assert_eq!(net_amount, 997);
+            
+            // Test edge case with small amount
+            let (net_small, fee_small) = htlc.calculate_fees(100);
+            assert_eq!(fee_small, 0); // 100 * 30 / 10000 = 0.3 -> 0 (integer division)
+            assert_eq!(net_small, 100);
+        }
+
+        #[ink::test]
+        fn test_address_mapping_functionality() {
+            let mut htlc = FusionHtlc::new();
+            let accounts = ink::env::test::default_accounts::<TestEnv>();
+            
+            ink::env::test::set_caller::<TestEnv>(accounts.alice);
+            
+            let eth_address = CrossChainAddress::Ethereum([0x42; 20]);
+            let result = htlc.map_address(eth_address.clone());
+            assert!(result.is_ok());
+            
+            let mapped = htlc.get_cross_address(accounts.alice);
+            assert_eq!(mapped, Some(eth_address));
+        }
+
+        #[ink::test]
+        fn test_contract_creation_success() {
+            let mut htlc = FusionHtlc::new();
+            let accounts = ink::env::test::default_accounts::<TestEnv>();
+            
+            // Setup test environment
+            ink::env::test::set_caller::<TestEnv>(accounts.alice);
+            ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
+            ink::env::test::set_block_number::<TestEnv>(100);
 
             let result = htlc.new_contract(
-                receiver, 
-                hashlock, 
-                timelock, 
-                swap_id, 
-                source_chain, 
-                dest_chain, 
-                dest_amount
+                accounts.bob,        // receiver
+                [0x01; 32],         // hashlock
+                500,                // timelock (400 blocks from now)
+                [0x02; 32],         // swap_id
+                1,                  // source_chain (Ethereum)
+                2,                  // dest_chain (Polkadot)
+                900,                // dest_amount
+                Some(vec![0xaa, 0xbb, 0xcc]),  // sender_cross_address
+                Some(vec![0xdd, 0xee, 0xff])   // receiver_cross_address
             );
+
             assert!(result.is_ok());
             
             let contract_id = result.unwrap();
             assert!(htlc.contract_exists(contract_id));
             
             let contract = htlc.get_contract(contract_id).unwrap();
-            assert_eq!(contract.dest_chain, dest_chain);
-            assert_eq!(contract.dest_amount, dest_amount);
+            assert_eq!(contract.sender, accounts.alice);
+            assert_eq!(contract.receiver, accounts.bob);
+            assert_eq!(contract.amount, 997); // 1000 - 3 (fee)
+            assert_eq!(contract.source_chain, 1);
+            assert_eq!(contract.dest_chain, 2);
+            assert!(!contract.withdrawn);
+            assert!(!contract.refunded);
+        }
+
+        #[ink::test]
+        fn test_timelock_validation() {
+            let mut htlc = FusionHtlc::new();
+            let accounts = ink::env::test::default_accounts::<TestEnv>();
+            
+            ink::env::test::set_caller::<TestEnv>(accounts.alice);
+            ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
+            ink::env::test::set_block_number::<TestEnv>(100);
+
+            // Test timelock too short
+            let result = htlc.new_contract(
+                accounts.bob, [0x01; 32], 150, [0x02; 32], 1, 2, 900, None, None
+            );
+            assert_eq!(result.err(), Some(Error::TimelockTooShort));
+
+            // Test timelock too long
+            let result = htlc.new_contract(
+                accounts.bob, [0x01; 32], 20000, [0x02; 32], 1, 2, 900, None, None
+            );
+            assert_eq!(result.err(), Some(Error::TimelockTooLong));
         }
 
         #[ink::test]
         fn test_relayer_registration() {
             let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts();
+            let accounts = ink::env::test::default_accounts::<TestEnv>();
             
-            ink::env::test::set_caller(accounts.alice);
-            ink::env::test::set_value_transferred(100u128.into());
-            ink::env::test::set_block_number::<DefaultEnvironment>(100);
+            // Create contract first
+            ink::env::test::set_caller::<TestEnv>(accounts.alice);
+            ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
+            ink::env::test::set_block_number::<TestEnv>(100);
 
             let contract_id = htlc.new_contract(
-                accounts.bob,
-                [1u8; 32],
-                1000,
-                [2u8; 32],
-                1,
-                2,
-                90u128
+                accounts.bob, [0x01; 32], 500, [0x02; 32], 1, 2, 900, None, None
             ).unwrap();
 
             // Register relayer
-            ink::env::test::set_caller(accounts.charlie);
+            ink::env::test::set_caller::<TestEnv>(accounts.charlie);
             let result = htlc.register_relayer(contract_id);
             assert!(result.is_ok());
 
