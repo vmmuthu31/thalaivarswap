@@ -1,690 +1,134 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ethers } from "ethers";
-import { ApiPromise, WsProvider } from "@polkadot/api";
+import { ApiPromise, WsProvider, Keyring } from "@polkadot/api";
 import { ContractPromise } from "@polkadot/api-contract";
-import { Keyring } from "@polkadot/keyring";
-import { cryptoWaitReady } from "@polkadot/util-crypto";
-import { FusionCrossChainSDK, SwapOrder, POLKADOT_CONFIG } from "./fusion-sdk";
+import { ethers } from "ethers";
 import { EventEmitter } from "events";
-
-const EVM_RELAYER_ABI = [
-  "event HTLCNew(bytes32 indexed contractId, address indexed sender, address indexed receiver, address token, uint256 amount, bytes32 hashlock, uint256 timelock, bytes32 swapId)",
-  "event HTLCWithdraw(bytes32 indexed contractId, bytes32 indexed secret)",
-  "event HTLCRefund(bytes32 indexed contractId)",
-  "function newETHContract(address _receiver, bytes32 _hashlock, uint256 _timelock, bytes32 _swapId, uint32 _destinationChain) external payable returns (bytes32)",
-  "function newERC20Contract(address _receiver, address _token, uint256 _amount, bytes32 _hashlock, uint256 _timelock, bytes32 _swapId, uint32 _destinationChain) external returns (bytes32)",
-  "function withdraw(bytes32 _contractId, bytes32 _preimage) external",
-  "function refund(bytes32 _contractId) external",
-  "function getContract(bytes32 _contractId) external view returns (tuple(address sender, address receiver, address token, uint256 amount, bytes32 hashlock, uint256 timelock, bool withdrawn, bool refunded, bytes32 preimage, bytes32 swapId, uint32 destinationChain))",
-];
-
-const POLKADOT_CONTRACT_METADATA = {
-  source: {
-    hash: "0x...",
-    language: "ink! 4.0.0",
-    compiler: "rustc 1.68.0",
-  },
-  contract: {
-    name: "fusion_htlc",
-    version: "1.0.0",
-  },
-  spec: {
-    constructors: [],
-    docs: [],
-    events: [
-      {
-        args: [
-          {
-            indexed: true,
-            name: "contract_id",
-            type: { displayName: ["Hash"], type: 1 },
-          },
-          {
-            indexed: true,
-            name: "sender",
-            type: { displayName: ["AccountId"], type: 0 },
-          },
-          {
-            indexed: true,
-            name: "receiver",
-            type: { displayName: ["AccountId"], type: 0 },
-          },
-          {
-            indexed: false,
-            name: "amount",
-            type: { displayName: ["Balance"], type: 6 },
-          },
-          {
-            indexed: false,
-            name: "hashlock",
-            type: { displayName: ["Hash"], type: 1 },
-          },
-          {
-            indexed: false,
-            name: "timelock",
-            type: { displayName: ["BlockNumber"], type: 4 },
-          },
-          {
-            indexed: false,
-            name: "swap_id",
-            type: { displayName: ["Hash"], type: 1 },
-          },
-        ],
-        docs: [],
-        label: "HTLCNew",
-      },
-    ],
-    messages: [
-      {
-        args: [
-          { name: "receiver", type: { displayName: ["AccountId"], type: 0 } },
-          { name: "amount", type: { displayName: ["U256"], type: 7 } },
-          { name: "hashlock", type: { displayName: ["Hash"], type: 1 } },
-          { name: "timelock", type: { displayName: ["BlockNumber"], type: 4 } },
-          { name: "swap_id", type: { displayName: ["Hash"], type: 1 } },
-          { name: "source_chain", type: { displayName: ["u32"], type: 5 } },
-        ],
-        docs: [],
-        label: "new_contract",
-        mutates: true,
-        payable: true,
-        returnType: { displayName: ["Result"], type: 8 },
-      },
-    ],
-  },
-};
-
-export interface EscrowContract {
+import axios from "axios";
+import contractMetadata from "./polkadotrelayer.json";
+// Types
+interface HTLCContract {
   contractId: string;
   sender: string;
   receiver: string;
-  token?: string;
   amount: string;
   hashlock: string;
   timelock: number;
   swapId: string;
-  chain: "ethereum" | "polkadot";
-  withdrawn: boolean;
-  refunded: boolean;
-  preimage?: string;
+  sourceChain: number;
+  destChain: number;
+  destAmount: string;
+  status: "pending" | "completed" | "refunded" | "expired";
 }
 
-export interface CrossChainSwap {
-  swapId: string;
-  direction: "eth-to-dot" | "dot-to-eth";
-  ethEscrow?: EscrowContract;
-  dotEscrow?: EscrowContract;
-  fusionOrder?: SwapOrder;
-  status:
-    | "initiated"
-    | "escrowed"
-    | "ready"
-    | "completed"
-    | "failed"
-    | "refunded";
-  secrets: string[];
-  secretHashes: string[];
-  createdAt: number;
-  completedAt?: number;
+interface SwapOrder {
+  id: string;
+  maker: string;
+  taker?: string;
+  sourceChain: number;
+  destChain: number;
+  sourceToken: string;
+  destToken: string;
+  sourceAmount: string;
+  destAmount: string;
+  secret: string;
+  hashlock: string;
+  timelock: number;
+  status: "created" | "matched" | "executing" | "completed" | "failed";
 }
 
-export class BidirectionalRelayer extends EventEmitter {
-  private ethProvider: ethers.JsonRpcProvider;
-  private polkadotApi?: ApiPromise;
-  private ethContract: ethers.Contract;
-  private polkadotContract?: ContractPromise;
+export class CrossChainRelayer extends EventEmitter {
+  private polkadotApi: ApiPromise | null = null;
+  private ethereumProvider: ethers.Provider;
+  private ethereumSigner: ethers.Wallet;
+  private polkadotContract: ContractPromise | null = null;
+  private ethereumContract: ethers.Contract;
   private keyring: Keyring;
-  private fusionSDK: FusionCrossChainSDK;
+  private polkadotAccount: any;
 
-  private activeSwaps: Map<string, CrossChainSwap> = new Map();
-  private isMonitoring = false;
-
+  // Configuration
   private config = {
-    ethRpcUrl:
-      process.env.ETH_RPC_URL ||
-      "https://eth-sepolia.g.alchemy.com/v2/your-api-key",
-    ethContractAddress: process.env.ETH_CONTRACT_ADDRESS || "0x...",
-    polkadotWsUrl: POLKADOT_CONFIG.WSS_ENDPOINT,
-    polkadotContractAddress: POLKADOT_CONFIG.RELAYER_CONTRACT_ADDRESS,
-    privateKey: process.env.RELAYER_PRIVATE_KEY || "",
-    polkadotSeed: process.env.POLKADOT_SEED || "//Alice",
-    finalityBlocks: 12, // Ethereum finality blocks
-    timelock: 3600, // 1 hour timelock
-    polkadotTimelock: 1800, // 30 minutes (shorter for destination chain)
+    polkadot: {
+      endpoint: "wss://rpc1.paseo.popnetwork.xyz",
+      contractAddress: process.env.POLKADOT_CONTRACT_ADDRESS || "",
+      seedPhrase: process.env.POLKADOT_SEED_PHRASE || "",
+    },
+    ethereum: {
+      rpcUrl:
+        process.env.ETHEREUM_RPC_URL || "https://sepolia.infura.io/v3/YOUR_KEY",
+      contractAddress: process.env.ETHEREUM_CONTRACT_ADDRESS || "",
+      privateKey: process.env.ETHEREUM_PRIVATE_KEY || "",
+    },
+    oneInch: {
+      apiUrl: "https://api.1inch.dev/fusion-plus",
+      apiKey: process.env.ONEINCH_API_KEY || "",
+    },
   };
 
-  constructor(
-    ethRpcUrl?: string,
-    ethContractAddress?: string,
-    fusionApiKey?: string
-  ) {
+  // Active swaps tracking
+  private activeSwaps = new Map<string, SwapOrder>();
+  private pendingHTLCs = new Map<string, HTLCContract>();
+
+  constructor() {
     super();
 
-    if (ethRpcUrl) this.config.ethRpcUrl = ethRpcUrl;
-    if (ethContractAddress) this.config.ethContractAddress = ethContractAddress;
-
-    this.ethProvider = new ethers.JsonRpcProvider(this.config.ethRpcUrl);
-    this.ethContract = new ethers.Contract(
-      this.config.ethContractAddress,
-      EVM_RELAYER_ABI,
-      this.ethProvider
+    // Initialize Ethereum
+    this.ethereumProvider = new ethers.JsonRpcProvider(
+      this.config.ethereum.rpcUrl
+    );
+    this.ethereumSigner = new ethers.Wallet(
+      this.config.ethereum.privateKey,
+      this.ethereumProvider
     );
 
+    // Initialize Polkadot keyring
     this.keyring = new Keyring({ type: "sr25519" });
+    this.polkadotAccount = this.keyring.addFromUri(
+      this.config.polkadot.seedPhrase
+    );
 
-    this.fusionSDK = new FusionCrossChainSDK(
-      "https://api.1inch.dev/fusion-plus",
-      fusionApiKey,
-      this.config.privateKey,
-      this.config.ethRpcUrl
+    // Ethereum contract ABI (simplified)
+    const ethereumABI = [
+      "event HTLCNew(bytes32 indexed contractId, address indexed sender, address indexed receiver, address token, uint256 amount, bytes32 hashlock, uint256 timelock, bytes32 swapId, uint32 sourceChain, uint32 destChain, uint256 destAmount, address relayer)",
+      "event HTLCWithdraw(bytes32 indexed contractId, bytes32 indexed secret, address indexed relayer)",
+      "event HTLCRefund(bytes32 indexed contractId)",
+      "function newContract(address receiver, address token, uint256 amount, bytes32 hashlock, uint256 timelock, bytes32 swapId, uint32 sourceChain, uint32 destChain, uint256 destAmount) external payable returns (bytes32)",
+      "function withdraw(bytes32 contractId, bytes32 preimage) external",
+      "function registerRelayer(bytes32 contractId) external",
+      "function getContract(bytes32 contractId) external view returns (tuple(address sender, address receiver, address token, uint256 amount, bytes32 hashlock, uint256 timelock, bool withdrawn, bool refunded, bytes32 preimage, bytes32 swapId, uint32 sourceChain, uint32 destChain, uint256 destAmount, uint256 fee, address relayer))",
+    ];
+
+    this.ethereumContract = new ethers.Contract(
+      this.config.ethereum.contractAddress,
+      ethereumABI,
+      this.ethereumSigner
     );
   }
 
-  /**
-   * Initialize the relayer system
-   */
   async initialize(): Promise<void> {
-    try {
-      console.log("Initializing Bidirectional Relayer...");
+    console.log("🚀 Initializing Cross-Chain Relayer...");
 
-      await cryptoWaitReady();
+    // Connect to Polkadot
+    const wsProvider = new WsProvider(this.config.polkadot.endpoint);
+    this.polkadotApi = await ApiPromise.create({ provider: wsProvider });
 
-      const wsProvider = new WsProvider(this.config.polkadotWsUrl);
-      this.polkadotApi = await ApiPromise.create({ provider: wsProvider });
-
-      this.polkadotContract = new ContractPromise(
-        this.polkadotApi,
-        POLKADOT_CONTRACT_METADATA,
-        this.config.polkadotContractAddress
-      );
-
-      console.log("✅ Bidirectional Relayer initialized successfully");
-      this.emit("initialized");
-    } catch (error) {
-      console.error("❌ Failed to initialize Bidirectional Relayer:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Start monitoring both chains for swap events
-   */
-  async startMonitoring(): Promise<void> {
-    if (this.isMonitoring) {
-      console.log("Relayer is already monitoring");
-      return;
-    }
-
-    this.isMonitoring = true;
-    console.log("🔍 Starting cross-chain event monitoring...");
-
-    this.monitorEthereumEvents();
-
-    await this.monitorPolkadotEvents();
-
-    // Start periodic status checks
-    this.startStatusChecks();
-
-    this.emit("monitoring-started");
-  }
-
-  /**
-   * Stop monitoring
-   */
-  async stopMonitoring(): Promise<void> {
-    this.isMonitoring = false;
-    console.log("⏹️ Stopped cross-chain monitoring");
-    this.emit("monitoring-stopped");
-  }
-
-  /**
-   * Create a new ETH → DOT swap
-   */
-  async createEthToDotSwap(
-    ethAmount: string,
-    ethSender: string,
-    dotRecipient: string,
-    secrets?: string[]
-  ): Promise<CrossChainSwap> {
-    try {
-      console.log(`🔄 Creating ETH → DOT swap: ${ethAmount} ETH`);
-
-      // Generate swap ID and secrets
-      const swapId = ethers.keccak256(
-        ethers.toUtf8Bytes(`${Date.now()}-${ethSender}-${dotRecipient}`)
-      );
-      const swapSecrets = secrets || [
-        this.generateSecret(),
-        this.generateSecret(),
-      ];
-      const secretHashes = swapSecrets.map((secret) =>
-        ethers.keccak256(ethers.toUtf8Bytes(secret))
-      );
-
-      // Create Fusion+ order
-      const fusionOrder = await this.fusionSDK.createEthToDotSwap(
-        ethAmount,
-        ethSender,
-        dotRecipient
-      );
-
-      // Create cross-chain swap record
-      const swap: CrossChainSwap = {
-        swapId,
-        direction: "eth-to-dot",
-        fusionOrder,
-        status: "initiated",
-        secrets: swapSecrets,
-        secretHashes: secretHashes.map((h) => h.toString()),
-        createdAt: Date.now(),
-      };
-
-      this.activeSwaps.set(swapId, swap);
-
-      console.log(`✅ ETH → DOT swap created with ID: ${swapId}`);
-      this.emit("swap-created", swap);
-
-      return swap;
-    } catch (error) {
-      console.error("❌ Failed to create ETH → DOT swap:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Create a new DOT → ETH swap
-   */
-  async createDotToEthSwap(
-    dotAmount: string,
-    dotSender: string,
-    ethRecipient: string,
-    secrets?: string[]
-  ): Promise<CrossChainSwap> {
-    try {
-      console.log(`🔄 Creating DOT → ETH swap: ${dotAmount} DOT`);
-
-      // Generate swap ID and secrets
-      const swapId = ethers.keccak256(
-        ethers.toUtf8Bytes(`${Date.now()}-${dotSender}-${ethRecipient}`)
-      );
-      const swapSecrets = secrets || [
-        this.generateSecret(),
-        this.generateSecret(),
-      ];
-      const secretHashes = swapSecrets.map((secret) =>
-        ethers.keccak256(ethers.toUtf8Bytes(secret))
-      );
-
-      // Create Fusion+ order
-      const fusionOrder = await this.fusionSDK.createDotToEthSwap(
-        dotAmount,
-        dotSender,
-        ethRecipient
-      );
-
-      // Create cross-chain swap record
-      const swap: CrossChainSwap = {
-        swapId,
-        direction: "dot-to-eth",
-        fusionOrder,
-        status: "initiated",
-        secrets: swapSecrets,
-        secretHashes: secretHashes.map((h) => h.toString()),
-        createdAt: Date.now(),
-      };
-
-      this.activeSwaps.set(swapId, swap);
-
-      console.log(`✅ DOT → ETH swap created with ID: ${swapId}`);
-      this.emit("swap-created", swap);
-
-      return swap;
-    } catch (error) {
-      console.error("❌ Failed to create DOT → ETH swap:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Execute bidirectional swap with proper escrow synchronization
-   */
-  async executeBidirectionalSwap(swap: CrossChainSwap): Promise<void> {
-    try {
-      console.log(`🚀 Executing bidirectional swap: ${swap.swapId}`);
-
-      if (swap.direction === "eth-to-dot") {
-        await this.executeEthToDotSwap(swap);
-      } else {
-        await this.executeDotToEthSwap(swap);
-      }
-    } catch (error) {
-      console.error(`❌ Failed to execute swap ${swap.swapId}:`, error);
-      swap.status = "failed";
-      this.activeSwaps.set(swap.swapId, swap);
-      this.emit("swap-failed", swap, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Execute ETH → DOT swap
-   */
-  private async executeEthToDotSwap(swap: CrossChainSwap): Promise<void> {
-    // Step 1: Create ETH escrow
-    const ethEscrow = await this.createEthEscrow(swap);
-    swap.ethEscrow = ethEscrow;
-    swap.status = "escrowed";
-    this.activeSwaps.set(swap.swapId, swap);
-    this.emit("escrow-created", swap, "ethereum");
-
-    // Step 2: Wait for finality and create DOT escrow
-    await this.waitForFinality("ethereum", ethEscrow.contractId);
-    const dotEscrow = await this.createDotEscrow(swap);
-    swap.dotEscrow = dotEscrow;
-    this.activeSwaps.set(swap.swapId, swap);
-    this.emit("escrow-created", swap, "polkadot");
-
-    // Step 3: Wait for DOT finality
-    await this.waitForFinality("polkadot", dotEscrow.contractId);
-    swap.status = "ready";
-    this.activeSwaps.set(swap.swapId, swap);
-    this.emit("swap-ready", swap);
-
-    // Step 4: Submit secrets to complete swap
-    await this.completeSwap(swap);
-  }
-
-  /**
-   * Execute DOT → ETH swap
-   */
-  private async executeDotToEthSwap(swap: CrossChainSwap): Promise<void> {
-    // Step 1: Create DOT escrow
-    const dotEscrow = await this.createDotEscrow(swap);
-    swap.dotEscrow = dotEscrow;
-    swap.status = "escrowed";
-    this.activeSwaps.set(swap.swapId, swap);
-    this.emit("escrow-created", swap, "polkadot");
-
-    // Step 2: Wait for finality and create ETH escrow
-    await this.waitForFinality("polkadot", dotEscrow.contractId);
-    const ethEscrow = await this.createEthEscrow(swap);
-    swap.ethEscrow = ethEscrow;
-    this.activeSwaps.set(swap.swapId, swap);
-    this.emit("escrow-created", swap, "ethereum");
-
-    // Step 3: Wait for ETH finality
-    await this.waitForFinality("ethereum", ethEscrow.contractId);
-    swap.status = "ready";
-    this.activeSwaps.set(swap.swapId, swap);
-    this.emit("swap-ready", swap);
-
-    // Step 4: Submit secrets to complete swap
-    await this.completeSwap(swap);
-  }
-
-  /**
-   * Create Ethereum escrow contract
-   */
-  private async createEthEscrow(swap: CrossChainSwap): Promise<EscrowContract> {
-    if (!this.config.privateKey) {
-      throw new Error("Private key not configured for Ethereum transactions");
-    }
-
-    const wallet = new ethers.Wallet(this.config.privateKey, this.ethProvider);
-    const contractWithSigner = this.ethContract.connect(wallet);
-
-    const timelock = Math.floor(Date.now() / 1000) + this.config.timelock;
-    const hashlock = swap.secretHashes[0];
-
-    // Determine if ETH or ERC20
-    const isEth = swap.direction === "eth-to-dot";
-
-    let tx: ethers.ContractTransactionResponse;
-    let amount: string;
-
-    if (isEth && swap.fusionOrder) {
-      // ETH transfer
-      amount = ethers.parseEther("0.1").toString(); // Example amount
-      tx = await (contractWithSigner as any).newETHContract(
-        swap.direction === "eth-to-dot" ? "0x..." : wallet.address, // receiver
-        hashlock,
-        timelock,
-        swap.swapId,
-        1000, // destination chain ID
-        { value: amount }
-      );
-    } else {
-      throw new Error("ERC20 escrow not implemented in this example");
-    }
-
-    const receipt = await tx.wait();
-    const contractId =
-      receipt?.logs?.[0]?.topics?.[1] ||
-      ethers.keccak256(ethers.toUtf8Bytes(swap.swapId));
-
-    return {
-      contractId,
-      sender: wallet.address,
-      receiver: swap.direction === "eth-to-dot" ? "0x..." : wallet.address,
-      amount,
-      hashlock,
-      timelock,
-      swapId: swap.swapId,
-      chain: "ethereum",
-      withdrawn: false,
-      refunded: false,
-    };
-  }
-
-  /**
-   * Create Polkadot escrow contract
-   */
-  private async createDotEscrow(swap: CrossChainSwap): Promise<EscrowContract> {
-    if (!this.polkadotApi || !this.polkadotContract) {
-      throw new Error("Polkadot API not initialized");
-    }
-
-    const keyPair = this.keyring.addFromUri(this.config.polkadotSeed);
-    const timelock = await this.polkadotApi.query.system.number();
-    const finalTimelock =
-      (timelock as any).toNumber() + this.config.polkadotTimelock;
-
-    const amount = "1000000000000"; // Example DOT amount (with decimals)
-    const hashlock = swap.secretHashes[0];
-
-    // Call the contract
-    const tx = this.polkadotContract.tx.newContract(
-      { gasLimit: -1, storageDepositLimit: null, value: amount },
-      swap.direction === "dot-to-eth" ? keyPair.address : "5G...", // receiver
-      amount,
-      hashlock,
-      finalTimelock,
-      swap.swapId,
-      1 // source chain ID
+    // Load contract metadata (you'll need to provide this)
+    this.polkadotContract = new ContractPromise(
+      this.polkadotApi,
+      contractMetadata,
+      this.config.polkadot.contractAddress
     );
 
-    await new Promise((resolve, reject) => {
-      tx.signAndSend(keyPair, (result: any) => {
-        if (result.status.isInBlock) {
-          resolve(result);
-        } else if (result.status.isError) {
-          reject(new Error("Transaction failed"));
-        }
-      });
-    });
+    // Start event listeners
+    this.startPolkadotEventListener();
+    this.startEthereumEventListener();
 
-    return {
-      contractId: ethers.keccak256(ethers.toUtf8Bytes(swap.swapId + "-dot")),
-      sender: keyPair.address,
-      receiver: swap.direction === "dot-to-eth" ? keyPair.address : "5G...",
-      amount,
-      hashlock,
-      timelock: finalTimelock,
-      swapId: swap.swapId,
-      chain: "polkadot",
-      withdrawn: false,
-      refunded: false,
-    };
+    console.log("✅ Relayer initialized successfully!");
   }
 
-  /**
-   * Wait for finality on specified chain
-   */
-  private async waitForFinality(
-    chain: "ethereum" | "polkadot",
-    contractId: string
-  ): Promise<void> {
-    console.log(
-      `⏳ Waiting for finality on ${chain} for contract ${contractId}`
-    );
+  private startPolkadotEventListener(): void {
+    if (!this.polkadotContract || !this.polkadotApi) return;
 
-    if (chain === "ethereum") {
-      // Wait for specified number of blocks
-      const currentBlock = await this.ethProvider.getBlockNumber();
-      const targetBlock = currentBlock + this.config.finalityBlocks;
-
-      while (true) {
-        const latestBlock = await this.ethProvider.getBlockNumber();
-        if (latestBlock >= targetBlock) break;
-        await new Promise((resolve) => setTimeout(resolve, 15000)); // Wait 15 seconds
-      }
-    } else {
-      // For Polkadot, wait for a few blocks
-      if (!this.polkadotApi) return;
-
-      const currentBlock = await this.polkadotApi.query.system.number();
-      const targetBlock = (currentBlock as any).toNumber() + 6; // 6 blocks for finality
-
-      while (true) {
-        const latestBlock = await this.polkadotApi.query.system.number();
-        if ((latestBlock as any).toNumber() >= targetBlock) break;
-        await new Promise((resolve) => setTimeout(resolve, 12000)); // Wait 12 seconds
-      }
-    }
-
-    console.log(`✅ Finality reached on ${chain}`);
-  }
-
-  /**
-   * Complete the swap by revealing secrets
-   */
-  private async completeSwap(swap: CrossChainSwap): Promise<void> {
-    try {
-      console.log(`🔓 Completing swap ${swap.swapId} by revealing secrets`);
-
-      // Submit secret to Fusion+ if applicable
-      if (swap.fusionOrder) {
-        await this.fusionSDK.submitSecret(
-          swap.fusionOrder.orderHash,
-          swap.secrets[0]
-        );
-      }
-
-      // Withdraw from both escrows using the secret
-      await this.withdrawFromEscrows(swap);
-
-      swap.status = "completed";
-      swap.completedAt = Date.now();
-      this.activeSwaps.set(swap.swapId, swap);
-
-      console.log(`✅ Swap ${swap.swapId} completed successfully`);
-      this.emit("swap-completed", swap);
-    } catch (error) {
-      console.error(`❌ Failed to complete swap ${swap.swapId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Withdraw from both escrow contracts
-   */
-  private async withdrawFromEscrows(swap: CrossChainSwap): Promise<void> {
-    const secret = swap.secrets[0];
-
-    // Withdraw from Ethereum escrow
-    if (swap.ethEscrow && this.config.privateKey) {
-      const wallet = new ethers.Wallet(
-        this.config.privateKey,
-        this.ethProvider
-      );
-      const contractWithSigner = this.ethContract.connect(wallet);
-
-      const tx = await (contractWithSigner as any).withdraw(
-        swap.ethEscrow.contractId,
-        ethers.keccak256(ethers.toUtf8Bytes(secret))
-      );
-      await tx.wait();
-
-      swap.ethEscrow.withdrawn = true;
-      swap.ethEscrow.preimage = secret;
-    }
-
-    // Withdraw from Polkadot escrow
-    if (swap.dotEscrow && this.polkadotContract) {
-      const keyPair = this.keyring.addFromUri(this.config.polkadotSeed);
-
-      const tx = this.polkadotContract.tx.withdraw(
-        { gasLimit: -1, storageDepositLimit: null },
-        swap.dotEscrow.contractId,
-        secret
-      );
-
-      await new Promise((resolve, reject) => {
-        tx.signAndSend(keyPair, (result: any) => {
-          if (result.status.isInBlock) {
-            resolve(result);
-          } else if (result.status.isError) {
-            reject(new Error("Withdrawal failed"));
-          }
-        });
-      });
-
-      swap.dotEscrow.withdrawn = true;
-      swap.dotEscrow.preimage = secret;
-    }
-  }
-
-  /**
-   * Monitor Ethereum events
-   */
-  private monitorEthereumEvents(): void {
-    this.ethContract.on(
-      "HTLCNew",
-      (
-        contractId,
-        sender,
-        receiver,
-        token,
-        amount,
-        hashlock,
-        timelock,
-        swapId
-      ) => {
-        console.log(`📡 Ethereum HTLC Created: ${contractId}`);
-        this.emit("ethereum-htlc-created", {
-          contractId,
-          sender,
-          receiver,
-          token,
-          amount: amount.toString(),
-          hashlock,
-          timelock: timelock.toNumber(),
-          swapId,
-        });
-      }
-    );
-
-    this.ethContract.on("HTLCWithdraw", (contractId, secret) => {
-      console.log(`🔓 Ethereum HTLC Withdrawn: ${contractId}`);
-      this.emit("ethereum-htlc-withdrawn", { contractId, secret });
-    });
-  }
-
-  /**
-   * Monitor Polkadot events
-   */
-  private async monitorPolkadotEvents(): Promise<void> {
-    if (!this.polkadotApi) return;
+    console.log("👂 Starting Polkadot event listener...");
 
     this.polkadotApi.query.system.events((events: any) => {
       events.forEach((record: any) => {
@@ -694,162 +138,306 @@ export class BidirectionalRelayer extends EventEmitter {
           event.section === "contracts" &&
           event.method === "ContractEmitted"
         ) {
-          console.log(`📡 Polkadot Contract Event: ${event.data}`);
-          this.emit("polkadot-contract-event", event.data);
+          const [contract, data] = event.data;
+
+          if (contract.toString() === this.config.polkadot.contractAddress) {
+            this.handlePolkadotContractEvent(data);
+          }
         }
       });
     });
   }
 
-  /**
-   * Start periodic status checks
-   */
-  private startStatusChecks(): void {
-    setInterval(async () => {
-      if (!this.isMonitoring) return;
+  private startEthereumEventListener(): void {
+    console.log("👂 Starting Ethereum event listener...");
 
-      for (const [swapId, swap] of this.activeSwaps) {
-        try {
-          await this.checkSwapStatus(swap);
-        } catch (error) {
-          console.error(`Error checking swap ${swapId}:`, error);
-        }
-      }
-    }, 30000); // Check every 30 seconds
+    // Listen for new HTLC contracts
+    this.ethereumContract.on("HTLCNew", (...args) => {
+      const event = args[args.length - 1];
+      this.handleEthereumHTLCNew(event);
+    });
+
+    // Listen for withdrawals
+    this.ethereumContract.on("HTLCWithdraw", (...args) => {
+      const event = args[args.length - 1];
+      this.handleEthereumHTLCWithdraw(event);
+    });
+
+    // Listen for refunds
+    this.ethereumContract.on("HTLCRefund", (...args) => {
+      const event = args[args.length - 1];
+      this.handleEthereumHTLCRefund(event);
+    });
   }
 
-  /**
-   * Check individual swap status
-   */
-  private async checkSwapStatus(swap: CrossChainSwap): Promise<void> {
-    // Check if swap has timed out
-    const now = Date.now();
-    const timeoutMs = this.config.timelock * 1000;
+  private handlePolkadotContractEvent(data: any): void {
+    // Parse Polkadot contract events
+    // This is simplified - you'll need to decode the actual event data
+    console.log("📨 Polkadot contract event:", data.toString());
 
-    if (now - swap.createdAt > timeoutMs && swap.status !== "completed") {
-      console.log(`⚠️ Swap ${swap.swapId} has timed out, initiating refund`);
-      await this.refundSwap(swap);
-    }
+    // Example: Handle HTLCNew event
+    // const decoded = this.polkadotContract.abi.decodeEvent(data);
+    // Handle the event based on its type
+  }
 
-    // Check Fusion+ order status if applicable
-    if (swap.fusionOrder && swap.status !== "completed") {
-      try {
-        const orderStatus = await this.fusionSDK.monitorOrderStatus(
-          swap.fusionOrder.orderHash
-        );
-        console.log(
-          `📊 Fusion+ order ${swap.fusionOrder.orderHash} status:`,
-          orderStatus
-        );
-      } catch (error) {
-        console.log(`Could not check Fusion+ order status:`, error);
+  private async handleEthereumHTLCNew(event: ethers.Log): Promise<void> {
+    console.log("🆕 New Ethereum HTLC:", event);
+
+    const contractId = event.topics[1];
+    const sender = event.topics[2];
+    const receiver = event.topics[3];
+
+    // Decode additional data from event
+    const decoded = this.ethereumContract.interface.parseLog({
+      topics: event.topics,
+      data: event.data,
+    });
+
+    if (decoded) {
+      const htlc: HTLCContract = {
+        contractId: decoded.args.contractId,
+        sender: decoded.args.sender,
+        receiver: decoded.args.receiver,
+        amount: decoded.args.amount.toString(),
+        hashlock: decoded.args.hashlock,
+        timelock: Number(decoded.args.timelock),
+        swapId: decoded.args.swapId,
+        sourceChain: decoded.args.sourceChain,
+        destChain: decoded.args.destChain,
+        destAmount: decoded.args.destAmount.toString(),
+        status: "pending",
+      };
+
+      this.pendingHTLCs.set(contractId, htlc);
+
+      // If this is destined for Polkadot, create matching HTLC
+      if (decoded.args.destChain === 1002) {
+        // Pop Network chain ID
+        await this.createPolkadotHTLC(htlc);
       }
     }
   }
 
-  /**
-   * Refund a timed-out swap
-   */
-  private async refundSwap(swap: CrossChainSwap): Promise<void> {
+  private async handleEthereumHTLCWithdraw(event: ethers.Log): Promise<void> {
+    console.log("💰 Ethereum HTLC withdrawn:", event);
+
+    const contractId = event.topics[1];
+    const secret = event.topics[2];
+
+    // Use the revealed secret to complete Polkadot side
+    const htlc = this.pendingHTLCs.get(contractId);
+    if (htlc && htlc.destChain === 1002) {
+      await this.completePolkadotHTLC(contractId, secret);
+    }
+  }
+
+  private handleEthereumHTLCRefund(event: ethers.Log): void {
+    console.log("🔄 Ethereum HTLC refunded:", event);
+
+    const contractId = event.topics[1];
+    const htlc = this.pendingHTLCs.get(contractId);
+    if (htlc) {
+      htlc.status = "refunded";
+      this.pendingHTLCs.set(contractId, htlc);
+    }
+  }
+
+  private async createPolkadotHTLC(ethHTLC: HTLCContract): Promise<void> {
+    if (!this.polkadotContract || !this.polkadotApi) return;
+
+    console.log("🔗 Creating matching Polkadot HTLC...");
+
     try {
-      console.log(`🔄 Refunding swap ${swap.swapId}`);
+      // Register as relayer first
+      const registerTx = this.polkadotContract.tx.registerRelayer(
+        { gasLimit: -1, storageDepositLimit: null },
+        ethHTLC.contractId
+      );
 
-      // Refund Ethereum escrow
-      if (swap.ethEscrow && this.config.privateKey) {
-        const wallet = new ethers.Wallet(
-          this.config.privateKey,
-          this.ethProvider
-        );
-        const contractWithSigner = this.ethContract.connect(wallet);
+      await registerTx.signAndSend(this.polkadotAccount);
 
-        const tx = await (contractWithSigner as any).refund(
-          swap.ethEscrow.contractId
-        );
-        await tx.wait();
+      // Create new HTLC on Polkadot with shorter timelock
+      const shorterTimelock = ethHTLC.timelock - 3600; // 1 hour buffer
 
-        swap.ethEscrow.refunded = true;
-      }
+      const createTx = this.polkadotContract.tx.newContract(
+        {
+          gasLimit: -1,
+          storageDepositLimit: null,
+          value: ethHTLC.destAmount,
+        },
+        ethHTLC.receiver,
+        ethHTLC.hashlock,
+        shorterTimelock,
+        ethHTLC.swapId,
+        ethHTLC.sourceChain,
+        ethHTLC.destChain,
+        ethHTLC.amount
+      );
 
-      // Refund Polkadot escrow
-      if (swap.dotEscrow && this.polkadotContract) {
-        const keyPair = this.keyring.addFromUri(this.config.polkadotSeed);
+      await createTx.signAndSend(this.polkadotAccount);
 
-        const tx = this.polkadotContract.tx.refund(
-          { gasLimit: -1, storageDepositLimit: null },
-          swap.dotEscrow.contractId
-        );
-
-        await new Promise((resolve, reject) => {
-          tx.signAndSend(keyPair, (result: any) => {
-            if (result.status.isInBlock) {
-              resolve(result);
-            } else if (result.status.isError) {
-              reject(new Error("Refund failed"));
-            }
-          });
-        });
-
-        swap.dotEscrow.refunded = true;
-      }
-
-      swap.status = "refunded";
-      this.activeSwaps.set(swap.swapId, swap);
-
-      console.log(`✅ Swap ${swap.swapId} refunded successfully`);
-      this.emit("swap-refunded", swap);
+      console.log("✅ Polkadot HTLC created successfully");
     } catch (error) {
-      console.error(`❌ Failed to refund swap ${swap.swapId}:`, error);
-      throw error;
+      console.error("❌ Failed to create Polkadot HTLC:", error);
     }
   }
 
-  /**
-   * Generate a random secret
-   */
-  private generateSecret(): string {
-    return ethers.keccak256(ethers.toUtf8Bytes(Math.random().toString()));
+  private async completePolkadotHTLC(
+    contractId: string,
+    secret: string
+  ): Promise<void> {
+    if (!this.polkadotContract) return;
+
+    console.log("🎯 Completing Polkadot HTLC with revealed secret...");
+
+    try {
+      const withdrawTx = this.polkadotContract.tx.withdraw(
+        { gasLimit: -1, storageDepositLimit: null },
+        contractId,
+        secret
+      );
+
+      await withdrawTx.signAndSend(this.polkadotAccount);
+
+      console.log("✅ Polkadot HTLC completed successfully");
+    } catch (error) {
+      console.error("❌ Failed to complete Polkadot HTLC:", error);
+    }
   }
 
-  /**
-   * Get swap by ID
-   */
-  getSwap(swapId: string): CrossChainSwap | undefined {
-    return this.activeSwaps.get(swapId);
+  // 1inch Fusion+ API Integration
+  async broadcastOrder(order: SwapOrder): Promise<void> {
+    try {
+      const response = await axios.post(
+        `${this.config.oneInch.apiUrl}/orders`,
+        {
+          order: {
+            maker: order.maker,
+            sourceChain: order.sourceChain,
+            destChain: order.destChain,
+            sourceToken: order.sourceToken,
+            destToken: order.destToken,
+            sourceAmount: order.sourceAmount,
+            destAmount: order.destAmount,
+            hashlock: order.hashlock,
+            timelock: order.timelock,
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.config.oneInch.apiKey}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log("📢 Order broadcasted to 1inch Fusion+:", response.data);
+    } catch (error) {
+      console.error("❌ Failed to broadcast order:", error);
+    }
   }
 
-  /**
-   * Get all active swaps
-   */
-  getAllSwaps(): CrossChainSwap[] {
-    return Array.from(this.activeSwaps.values());
+  async getActiveOrders(): Promise<SwapOrder[]> {
+    try {
+      const response = await axios.get(
+        `${this.config.oneInch.apiUrl}/orders/active`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.config.oneInch.apiKey}`,
+          },
+        }
+      );
+
+      return response.data.orders || [];
+    } catch (error) {
+      console.error("❌ Failed to fetch active orders:", error);
+      return [];
+    }
   }
 
-  /**
-   * Get swaps by status
-   */
-  getSwapsByStatus(status: CrossChainSwap["status"]): CrossChainSwap[] {
-    return Array.from(this.activeSwaps.values()).filter(
-      (swap) => swap.status === status
+  // Dutch auction mechanism
+  async participateInAuction(
+    orderId: string,
+    bidAmount: string
+  ): Promise<void> {
+    console.log(
+      `💰 Participating in auction for order ${orderId} with bid ${bidAmount}`
     );
+
+    // Implement competitive bidding logic
+    // This would interact with 1inch Fusion+ auction system
+    try {
+      const response = await axios.post(
+        `${this.config.oneInch.apiUrl}/orders/${orderId}/bid`,
+        { amount: bidAmount },
+        {
+          headers: {
+            Authorization: `Bearer ${this.config.oneInch.apiKey}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log("✅ Bid submitted successfully:", response.data);
+    } catch (error) {
+      console.error("❌ Failed to submit bid:", error);
+    }
   }
 
-  /**
-   * Clean up resources
-   */
-  async cleanup(): Promise<void> {
-    await this.stopMonitoring();
+  // Health check and monitoring
+  async healthCheck(): Promise<{ polkadot: boolean; ethereum: boolean }> {
+    const polkadotHealthy = this.polkadotApi?.isConnected || false;
+    const ethereumHealthy = await this.ethereumProvider
+      .getNetwork()
+      .then(() => true)
+      .catch(() => false);
+
+    return {
+      polkadot: polkadotHealthy,
+      ethereum: ethereumHealthy,
+    };
+  }
+
+  // Graceful shutdown
+  async shutdown(): Promise<void> {
+    console.log("🛑 Shutting down relayer...");
 
     if (this.polkadotApi) {
       await this.polkadotApi.disconnect();
     }
 
-    this.removeAllListeners();
-    console.log("🧹 Bidirectional Relayer cleanup completed");
+    this.ethereumContract.removeAllListeners();
+
+    console.log("✅ Relayer shutdown complete");
   }
 }
 
-// Export singleton instance
-export const bidirectionalRelayer = new BidirectionalRelayer();
+// Usage example
+async function main() {
+  const relayer = new CrossChainRelayer();
 
-// Export types and utilities
-export { EVM_RELAYER_ABI, POLKADOT_CONTRACT_METADATA };
+  try {
+    await relayer.initialize();
+
+    // Health check every 30 seconds
+    setInterval(async () => {
+      const health = await relayer.healthCheck();
+      console.log("🏥 Health check:", health);
+    }, 30000);
+
+    // Graceful shutdown handling
+    process.on("SIGINT", async () => {
+      await relayer.shutdown();
+      process.exit(0);
+    });
+
+    console.log("🎉 Relayer is running!");
+  } catch (error) {
+    console.error("💥 Failed to start relayer:", error);
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  main();
+}

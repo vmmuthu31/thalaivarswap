@@ -1,0 +1,1967 @@
+{
+  "source": {
+    "hash": "0x47ee28f15ebdd275bb5b05cf791a4a91222395d0eeab4c6e3d3294ad2ebd6f8a",
+    "language": "ink! 6.0.0-alpha",
+    "compiler": "rustc 1.90.0-nightly",
+    "build_info": {
+      "build_mode": "Debug",
+      "cargo_contract_version": "6.0.0-alpha",
+      "rust_toolchain": "nightly-aarch64-apple-darwin"
+    }
+  },
+  "contract": {
+    "name": "polkadotrelayer",
+    "version": "0.1.0",
+    "authors": [
+      "vairamuthu vairamuthu@polkassembly.io"
+    ]
+  },
+  "image": null,
+  "spec": {
+    "constructors": [
+      {
+        "args": [],
+        "default": false,
+        "docs": [],
+        "label": "new",
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink_primitives",
+            "ConstructorResult"
+          ],
+          "type": 18
+        },
+        "selector": "0x9bae9d5e"
+      }
+    ],
+    "docs": [],
+    "environment": {
+      "accountId": {
+        "displayName": [
+          "AccountId"
+        ],
+        "type": 32
+      },
+      "balance": {
+        "displayName": [
+          "Balance"
+        ],
+        "type": 3
+      },
+      "blockNumber": {
+        "displayName": [
+          "BlockNumber"
+        ],
+        "type": 4
+      },
+      "chainExtension": {
+        "displayName": [
+          "ChainExtension"
+        ],
+        "type": 34
+      },
+      "hash": {
+        "displayName": [
+          "Hash"
+        ],
+        "type": 33
+      },
+      "maxEventTopics": 4,
+      "staticBufferSize": 16384,
+      "timestamp": {
+        "displayName": [
+          "Timestamp"
+        ],
+        "type": 15
+      }
+    },
+    "events": [
+      {
+        "args": [
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "sender",
+            "type": {
+              "displayName": [
+                "Address"
+              ],
+              "type": 0
+            }
+          },
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "receiver",
+            "type": {
+              "displayName": [
+                "Address"
+              ],
+              "type": 0
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "amount",
+            "type": {
+              "displayName": [
+                "Balance"
+              ],
+              "type": 3
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "hashlock",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "timelock",
+            "type": {
+              "displayName": [
+                "BlockNumber"
+              ],
+              "type": 4
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "swap_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "source_chain",
+            "type": {
+              "displayName": [
+                "u32"
+              ],
+              "type": 4
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "dest_chain",
+            "type": {
+              "displayName": [
+                "u32"
+              ],
+              "type": 4
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "dest_amount",
+            "type": {
+              "displayName": [
+                "Balance"
+              ],
+              "type": 3
+            }
+          },
+          {
+            "docs": [],
+            "indexed": false,
+            "label": "relayer",
+            "type": {
+              "displayName": [
+                "Option"
+              ],
+              "type": 10
+            }
+          }
+        ],
+        "docs": [],
+        "label": "HTLCNew",
+        "module_path": "polkadotrelayer::polkadotrelayer",
+        "signature_topic": "0x9fea49bb84358e3f8e3672319b4230d53c5158356f5c4af5e38c0f4d674d61ae"
+      },
+      {
+        "args": [
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "secret",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "relayer",
+            "type": {
+              "displayName": [
+                "Option"
+              ],
+              "type": 10
+            }
+          }
+        ],
+        "docs": [],
+        "label": "HTLCWithdraw",
+        "module_path": "polkadotrelayer::polkadotrelayer",
+        "signature_topic": "0xb66a1be2c1ab693acac146e96a7ab993d095b3f42dccdb36d572ed07a3de1fd8"
+      },
+      {
+        "args": [
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "docs": [],
+        "label": "HTLCRefund",
+        "module_path": "polkadotrelayer::polkadotrelayer",
+        "signature_topic": "0xa66f3d5ddc5af52998e023c03f5bd183a42832a2eb5b141ff119aed224ac25b9"
+      },
+      {
+        "args": [
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "docs": [],
+            "indexed": true,
+            "label": "relayer",
+            "type": {
+              "displayName": [
+                "Address"
+              ],
+              "type": 0
+            }
+          }
+        ],
+        "docs": [
+          "Event emitted when a relayer registers for a swap"
+        ],
+        "label": "RelayerRegistered",
+        "module_path": "polkadotrelayer::polkadotrelayer",
+        "signature_topic": "0xb4bfb49ac7e5ac9755952e13abac9e156d7593542a20c189536acff19df07590"
+      }
+    ],
+    "lang_error": {
+      "displayName": [
+        "ink",
+        "LangError"
+      ],
+      "type": 19
+    },
+    "messages": [
+      {
+        "args": [
+          {
+            "label": "receiver",
+            "type": {
+              "displayName": [
+                "Address"
+              ],
+              "type": 0
+            }
+          },
+          {
+            "label": "hashlock",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "label": "timelock",
+            "type": {
+              "displayName": [
+                "BlockNumber"
+              ],
+              "type": 4
+            }
+          },
+          {
+            "label": "swap_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "label": "source_chain",
+            "type": {
+              "displayName": [
+                "u32"
+              ],
+              "type": 4
+            }
+          },
+          {
+            "label": "dest_chain",
+            "type": {
+              "displayName": [
+                "u32"
+              ],
+              "type": 4
+            }
+          },
+          {
+            "label": "dest_amount",
+            "type": {
+              "displayName": [
+                "Balance"
+              ],
+              "type": 3
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Create a new HTLC for cross-chain swap"
+        ],
+        "label": "new_contract",
+        "mutates": true,
+        "payable": true,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 20
+        },
+        "selector": "0xbbd45d7d"
+      },
+      {
+        "args": [
+          {
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Register a relayer for a specific swap"
+        ],
+        "label": "register_relayer",
+        "mutates": true,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 23
+        },
+        "selector": "0x8d5c54e0"
+      },
+      {
+        "args": [
+          {
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          },
+          {
+            "label": "preimage",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Withdraw funds using the preimage (secret)"
+        ],
+        "label": "withdraw",
+        "mutates": true,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 23
+        },
+        "selector": "0x410fcc9d"
+      },
+      {
+        "args": [
+          {
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Refund the sender after timelock expires"
+        ],
+        "label": "refund",
+        "mutates": true,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 23
+        },
+        "selector": "0xa5a47441"
+      },
+      {
+        "args": [
+          {
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Get contract details"
+        ],
+        "label": "get_contract",
+        "mutates": false,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 25
+        },
+        "selector": "0x4be1ea76"
+      },
+      {
+        "args": [
+          {
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Check if contract exists"
+        ],
+        "label": "contract_exists",
+        "mutates": false,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 27
+        },
+        "selector": "0xd7c15304"
+      },
+      {
+        "args": [
+          {
+            "label": "contract_id",
+            "type": {
+              "displayName": [],
+              "type": 7
+            }
+          }
+        ],
+        "default": false,
+        "docs": [
+          " Get the secret if revealed"
+        ],
+        "label": "get_secret",
+        "mutates": false,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 28
+        },
+        "selector": "0xb9ede8f2"
+      },
+      {
+        "args": [],
+        "default": false,
+        "docs": [
+          " Admin functions"
+        ],
+        "label": "get_admin",
+        "mutates": false,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 29
+        },
+        "selector": "0x57b8a8a7"
+      },
+      {
+        "args": [
+          {
+            "label": "new_admin",
+            "type": {
+              "displayName": [
+                "Address"
+              ],
+              "type": 0
+            }
+          }
+        ],
+        "default": false,
+        "docs": [],
+        "label": "update_admin",
+        "mutates": true,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 23
+        },
+        "selector": "0xf49d8754"
+      },
+      {
+        "args": [
+          {
+            "label": "new_fee_bps",
+            "type": {
+              "displayName": [
+                "u16"
+              ],
+              "type": 16
+            }
+          }
+        ],
+        "default": false,
+        "docs": [],
+        "label": "update_protocol_fee",
+        "mutates": true,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 23
+        },
+        "selector": "0x18b789d5"
+      },
+      {
+        "args": [],
+        "default": false,
+        "docs": [],
+        "label": "withdraw_protocol_fees",
+        "mutates": true,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 23
+        },
+        "selector": "0x5eeaf096"
+      },
+      {
+        "args": [],
+        "default": false,
+        "docs": [
+          " View functions"
+        ],
+        "label": "get_protocol_fee_bps",
+        "mutates": false,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 30
+        },
+        "selector": "0xb5f9cad3"
+      },
+      {
+        "args": [],
+        "default": false,
+        "docs": [],
+        "label": "get_protocol_fees",
+        "mutates": false,
+        "payable": false,
+        "returnType": {
+          "displayName": [
+            "ink",
+            "MessageResult"
+          ],
+          "type": 31
+        },
+        "selector": "0x42b4884f"
+      }
+    ]
+  },
+  "storage": {
+    "root": {
+      "layout": {
+        "struct": {
+          "fields": [
+            {
+              "layout": {
+                "root": {
+                  "layout": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 0
+                            }
+                          },
+                          "name": "sender"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 0
+                            }
+                          },
+                          "name": "receiver"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 3
+                            }
+                          },
+                          "name": "amount"
+                        },
+                        {
+                          "layout": {
+                            "array": {
+                              "layout": {
+                                "leaf": {
+                                  "key": "0x8ca81f8c",
+                                  "ty": 2
+                                }
+                              },
+                              "len": 32,
+                              "offset": "0x8ca81f8c"
+                            }
+                          },
+                          "name": "hashlock"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 4
+                            }
+                          },
+                          "name": "timelock"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 5
+                            }
+                          },
+                          "name": "withdrawn"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 5
+                            }
+                          },
+                          "name": "refunded"
+                        },
+                        {
+                          "layout": {
+                            "enum": {
+                              "dispatchKey": "0x8ca81f8c",
+                              "name": "Option",
+                              "variants": {
+                                "0": {
+                                  "fields": [],
+                                  "name": "None"
+                                },
+                                "1": {
+                                  "fields": [
+                                    {
+                                      "layout": {
+                                        "array": {
+                                          "layout": {
+                                            "leaf": {
+                                              "key": "0x8ca81f8c",
+                                              "ty": 2
+                                            }
+                                          },
+                                          "len": 32,
+                                          "offset": "0x8ca81f8c"
+                                        }
+                                      },
+                                      "name": "0"
+                                    }
+                                  ],
+                                  "name": "Some"
+                                }
+                              }
+                            }
+                          },
+                          "name": "preimage"
+                        },
+                        {
+                          "layout": {
+                            "array": {
+                              "layout": {
+                                "leaf": {
+                                  "key": "0x8ca81f8c",
+                                  "ty": 2
+                                }
+                              },
+                              "len": 32,
+                              "offset": "0x8ca81f8c"
+                            }
+                          },
+                          "name": "swap_id"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 4
+                            }
+                          },
+                          "name": "source_chain"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 4
+                            }
+                          },
+                          "name": "dest_chain"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 3
+                            }
+                          },
+                          "name": "dest_amount"
+                        },
+                        {
+                          "layout": {
+                            "leaf": {
+                              "key": "0x8ca81f8c",
+                              "ty": 3
+                            }
+                          },
+                          "name": "fee"
+                        },
+                        {
+                          "layout": {
+                            "enum": {
+                              "dispatchKey": "0x8ca81f8c",
+                              "name": "Option",
+                              "variants": {
+                                "0": {
+                                  "fields": [],
+                                  "name": "None"
+                                },
+                                "1": {
+                                  "fields": [
+                                    {
+                                      "layout": {
+                                        "leaf": {
+                                          "key": "0x8ca81f8c",
+                                          "ty": 0
+                                        }
+                                      },
+                                      "name": "0"
+                                    }
+                                  ],
+                                  "name": "Some"
+                                }
+                              }
+                            }
+                          },
+                          "name": "relayer"
+                        }
+                      ],
+                      "name": "LockContract"
+                    }
+                  },
+                  "root_key": "0x8ca81f8c",
+                  "ty": 6
+                }
+              },
+              "name": "contracts"
+            },
+            {
+              "layout": {
+                "leaf": {
+                  "key": "0x00000000",
+                  "ty": 15
+                }
+              },
+              "name": "contract_counter"
+            },
+            {
+              "layout": {
+                "leaf": {
+                  "key": "0x00000000",
+                  "ty": 0
+                }
+              },
+              "name": "admin"
+            },
+            {
+              "layout": {
+                "leaf": {
+                  "key": "0x00000000",
+                  "ty": 16
+                }
+              },
+              "name": "protocol_fee_bps"
+            },
+            {
+              "layout": {
+                "leaf": {
+                  "key": "0x00000000",
+                  "ty": 3
+                }
+              },
+              "name": "protocol_fees"
+            },
+            {
+              "layout": {
+                "leaf": {
+                  "key": "0x00000000",
+                  "ty": 4
+                }
+              },
+              "name": "min_timelock"
+            },
+            {
+              "layout": {
+                "leaf": {
+                  "key": "0x00000000",
+                  "ty": 4
+                }
+              },
+              "name": "max_timelock"
+            }
+          ],
+          "name": "FusionHtlc"
+        }
+      },
+      "root_key": "0x00000000",
+      "ty": 17
+    }
+  },
+  "types": [
+    {
+      "id": 0,
+      "type": {
+        "def": {
+          "composite": {
+            "fields": [
+              {
+                "type": 1,
+                "typeName": "[u8; 20]"
+              }
+            ]
+          }
+        },
+        "path": [
+          "primitive_types",
+          "H160"
+        ]
+      }
+    },
+    {
+      "id": 1,
+      "type": {
+        "def": {
+          "array": {
+            "len": 20,
+            "type": 2
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": {
+        "def": {
+          "primitive": "u8"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": {
+        "def": {
+          "primitive": "u128"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": {
+        "def": {
+          "primitive": "u32"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": {
+        "def": {
+          "primitive": "bool"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": {
+        "def": {
+          "composite": {}
+        },
+        "params": [
+          {
+            "name": "K",
+            "type": 7
+          },
+          {
+            "name": "V",
+            "type": 8
+          },
+          {
+            "name": "KeyType",
+            "type": 11
+          }
+        ],
+        "path": [
+          "ink_storage",
+          "lazy",
+          "mapping",
+          "Mapping"
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": {
+        "def": {
+          "array": {
+            "len": 32,
+            "type": 2
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": {
+        "def": {
+          "composite": {
+            "fields": [
+              {
+                "name": "sender",
+                "type": 0,
+                "typeName": "Address"
+              },
+              {
+                "name": "receiver",
+                "type": 0,
+                "typeName": "Address"
+              },
+              {
+                "name": "amount",
+                "type": 3,
+                "typeName": "Balance"
+              },
+              {
+                "name": "hashlock",
+                "type": 7,
+                "typeName": "[u8; 32]"
+              },
+              {
+                "name": "timelock",
+                "type": 4,
+                "typeName": "BlockNumber"
+              },
+              {
+                "name": "withdrawn",
+                "type": 5,
+                "typeName": "bool"
+              },
+              {
+                "name": "refunded",
+                "type": 5,
+                "typeName": "bool"
+              },
+              {
+                "name": "preimage",
+                "type": 9,
+                "typeName": "Option<[u8; 32]>"
+              },
+              {
+                "name": "swap_id",
+                "type": 7,
+                "typeName": "[u8; 32]"
+              },
+              {
+                "name": "source_chain",
+                "type": 4,
+                "typeName": "u32"
+              },
+              {
+                "name": "dest_chain",
+                "type": 4,
+                "typeName": "u32"
+              },
+              {
+                "name": "dest_amount",
+                "type": 3,
+                "typeName": "Balance"
+              },
+              {
+                "name": "fee",
+                "type": 3,
+                "typeName": "Balance"
+              },
+              {
+                "name": "relayer",
+                "type": 10,
+                "typeName": "Option<Address>"
+              }
+            ]
+          }
+        },
+        "path": [
+          "polkadotrelayer",
+          "polkadotrelayer",
+          "LockContract"
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "index": 0,
+                "name": "None"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 7
+                  }
+                ],
+                "index": 1,
+                "name": "Some"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 7
+          }
+        ],
+        "path": [
+          "Option"
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "index": 0,
+                "name": "None"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 0
+                  }
+                ],
+                "index": 1,
+                "name": "Some"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 0
+          }
+        ],
+        "path": [
+          "Option"
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "type": {
+        "def": {
+          "composite": {}
+        },
+        "params": [
+          {
+            "name": "L",
+            "type": 12
+          },
+          {
+            "name": "R",
+            "type": 13
+          }
+        ],
+        "path": [
+          "ink_storage_traits",
+          "impls",
+          "ResolverKey"
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "type": {
+        "def": {
+          "composite": {}
+        },
+        "path": [
+          "ink_storage_traits",
+          "impls",
+          "AutoKey"
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "type": {
+        "def": {
+          "composite": {}
+        },
+        "params": [
+          {
+            "name": "ParentKey",
+            "type": 14
+          }
+        ],
+        "path": [
+          "ink_storage_traits",
+          "impls",
+          "ManualKey"
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "type": {
+        "def": {
+          "tuple": []
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": {
+        "def": {
+          "primitive": "u64"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": {
+        "def": {
+          "primitive": "u16"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": {
+        "def": {
+          "composite": {
+            "fields": [
+              {
+                "name": "contracts",
+                "type": 6,
+                "typeName": "<Mapping<[u8; 32], LockContract> as::ink::storage::traits::\nAutoStorableHint<::ink::storage::traits::ManualKey<2350885004u32,\n()>,>>::Type"
+              },
+              {
+                "name": "contract_counter",
+                "type": 15,
+                "typeName": "<u64 as::ink::storage::traits::AutoStorableHint<::ink::storage\n::traits::ManualKey<1813208441u32, ()>,>>::Type"
+              },
+              {
+                "name": "admin",
+                "type": 0,
+                "typeName": "<Address as::ink::storage::traits::AutoStorableHint<::ink::\nstorage::traits::ManualKey<1168204269u32, ()>,>>::Type"
+              },
+              {
+                "name": "protocol_fee_bps",
+                "type": 16,
+                "typeName": "<u16 as::ink::storage::traits::AutoStorableHint<::ink::storage\n::traits::ManualKey<1570513033u32, ()>,>>::Type"
+              },
+              {
+                "name": "protocol_fees",
+                "type": 3,
+                "typeName": "<Balance as::ink::storage::traits::AutoStorableHint<::ink::\nstorage::traits::ManualKey<4191240358u32, ()>,>>::Type"
+              },
+              {
+                "name": "min_timelock",
+                "type": 4,
+                "typeName": "<BlockNumber as::ink::storage::traits::AutoStorableHint<::ink::\nstorage::traits::ManualKey<1439790782u32, ()>,>>::Type"
+              },
+              {
+                "name": "max_timelock",
+                "type": 4,
+                "typeName": "<BlockNumber as::ink::storage::traits::AutoStorableHint<::ink::\nstorage::traits::ManualKey<4269865866u32, ()>,>>::Type"
+              }
+            ]
+          }
+        },
+        "path": [
+          "polkadotrelayer",
+          "polkadotrelayer",
+          "FusionHtlc"
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 14
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 14
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "index": 1,
+                "name": "CouldNotReadInput"
+              }
+            ]
+          }
+        },
+        "path": [
+          "ink_primitives",
+          "LangError"
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 21
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 21
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 7
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 22
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 7
+          },
+          {
+            "name": "E",
+            "type": 22
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "index": 0,
+                "name": "ContractAlreadyExists"
+              },
+              {
+                "index": 1,
+                "name": "ContractNotFound"
+              },
+              {
+                "index": 2,
+                "name": "InvalidTimelock"
+              },
+              {
+                "index": 3,
+                "name": "InsufficientFunds"
+              },
+              {
+                "index": 4,
+                "name": "UnauthorizedWithdraw"
+              },
+              {
+                "index": 5,
+                "name": "UnauthorizedRefund"
+              },
+              {
+                "index": 6,
+                "name": "InvalidHashlock"
+              },
+              {
+                "index": 7,
+                "name": "AlreadyProcessed"
+              },
+              {
+                "index": 8,
+                "name": "TimelockNotExpired"
+              },
+              {
+                "index": 9,
+                "name": "TimelockExpired"
+              },
+              {
+                "index": 10,
+                "name": "TransferFailed"
+              },
+              {
+                "index": 11,
+                "name": "ConversionError"
+              },
+              {
+                "index": 12,
+                "name": "InvalidFee"
+              },
+              {
+                "index": 13,
+                "name": "InvalidChainId"
+              },
+              {
+                "index": 14,
+                "name": "RelayerAlreadySet"
+              },
+              {
+                "index": 15,
+                "name": "UnauthorizedRelayer"
+              },
+              {
+                "index": 16,
+                "name": "TimelockTooShort"
+              },
+              {
+                "index": 17,
+                "name": "TimelockTooLong"
+              }
+            ]
+          }
+        },
+        "path": [
+          "polkadotrelayer",
+          "polkadotrelayer",
+          "Error"
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 24
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 24
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 14
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 22
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 14
+          },
+          {
+            "name": "E",
+            "type": 22
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 26
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 26
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "index": 0,
+                "name": "None"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 8
+                  }
+                ],
+                "index": 1,
+                "name": "Some"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 8
+          }
+        ],
+        "path": [
+          "Option"
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 5
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 5
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 9
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 9
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 0
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 0
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 16
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 16
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "type": {
+        "def": {
+          "variant": {
+            "variants": [
+              {
+                "fields": [
+                  {
+                    "type": 3
+                  }
+                ],
+                "index": 0,
+                "name": "Ok"
+              },
+              {
+                "fields": [
+                  {
+                    "type": 19
+                  }
+                ],
+                "index": 1,
+                "name": "Err"
+              }
+            ]
+          }
+        },
+        "params": [
+          {
+            "name": "T",
+            "type": 3
+          },
+          {
+            "name": "E",
+            "type": 19
+          }
+        ],
+        "path": [
+          "Result"
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "type": {
+        "def": {
+          "composite": {
+            "fields": [
+              {
+                "type": 7,
+                "typeName": "[u8; 32]"
+              }
+            ]
+          }
+        },
+        "path": [
+          "ink_primitives",
+          "types",
+          "AccountId"
+        ]
+      }
+    },
+    {
+      "id": 33,
+      "type": {
+        "def": {
+          "composite": {
+            "fields": [
+              {
+                "type": 7,
+                "typeName": "[u8; 32]"
+              }
+            ]
+          }
+        },
+        "path": [
+          "ink_primitives",
+          "types",
+          "Hash"
+        ]
+      }
+    },
+    {
+      "id": 34,
+      "type": {
+        "def": {
+          "variant": {}
+        },
+        "path": [
+          "ink_primitives",
+          "types",
+          "NoChainExtension"
+        ]
+      }
+    }
+  ],
+  "version": 5
+}
