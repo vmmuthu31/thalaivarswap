@@ -511,7 +511,6 @@ async function main(): Promise<void> {
   process.exit(result.success ? 0 : 1);
 }
 
-// Run the deployment if this file is executed directly
 if (require.main === module) {
   main().catch((error) => {
     console.error("❌ Unhandled error:", error);

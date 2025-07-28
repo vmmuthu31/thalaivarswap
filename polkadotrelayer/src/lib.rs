@@ -7,7 +7,7 @@ mod polkadotrelayer {
     use scale::{Encode, Decode};
     use scale_info::TypeInfo;
 
-    /// The main HTLC contract for cross-chain swaps
+   
     #[ink(storage)]
     pub struct FusionHtlc {
         contracts: Mapping<[u8; 32], LockContract>,

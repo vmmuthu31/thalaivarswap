@@ -31,8 +31,8 @@ export const POLKADOT_CONFIG = {
 };
 
 export interface CrossChainSwapParams {
-  srcChainId: SupportedChain;
-  dstChainId: SupportedChain;
+  srcChainId: SupportedChain | number;
+  dstChainId: SupportedChain | number;
   srcTokenAddress: string;
   dstTokenAddress: string;
   amount: string;
@@ -49,6 +49,20 @@ export interface SwapOrder {
   srcEscrowId?: string;
   dstEscrowId?: string;
   status: "created" | "escrowed" | "ready" | "completed" | "failed";
+  // Custom fields for cross-chain coordination
+  isCustomBridge?: boolean;
+  ethContractId?: string;
+  dotContractId?: string;
+  timelock?: number;
+}
+
+export interface CustomBridgeQuote {
+  srcAmount: string;
+  dstAmount: string;
+  estimatedGas: string;
+  route: string[];
+  priceImpact: string;
+  isCustomBridge: true;
 }
 
 export class FusionCrossChainSDK {
@@ -79,12 +93,23 @@ export class FusionCrossChainSDK {
 
   /**
    * Get quote for cross-chain swap (ETH → DOT or DOT → ETH)
+   * For Polkadot swaps, we use custom bridge logic
    */
   async getSwapQuote(params: CrossChainSwapParams) {
     try {
+      // Check if this involves Polkadot
+      const isPolkadotSwap =
+        params.srcChainId === POLKADOT_CONFIG.ROCOCO_PARACHAIN_ID ||
+        params.dstChainId === POLKADOT_CONFIG.ROCOCO_PARACHAIN_ID;
+
+      if (isPolkadotSwap) {
+        return await this.getCustomBridgeQuote(params);
+      }
+
+      // Use standard 1inch Fusion+ for EVM-to-EVM swaps
       const quoteParams: QuoteParams = {
-        srcChainId: params.srcChainId,
-        dstChainId: params.dstChainId,
+        srcChainId: params.srcChainId as SupportedChain,
+        dstChainId: params.dstChainId as SupportedChain,
         srcTokenAddress: params.srcTokenAddress,
         dstTokenAddress: params.dstTokenAddress,
         amount: params.amount,
@@ -101,6 +126,27 @@ export class FusionCrossChainSDK {
   }
 
   /**
+   * Custom bridge quote for ETH ↔ DOT swaps
+   */
+  private async getCustomBridgeQuote(
+    params: CrossChainSwapParams
+  ): Promise<CustomBridgeQuote> {
+    // For demo purposes, we'll use a simple 1:1 ratio with some slippage
+    // In production, you'd integrate with price oracles
+    const srcAmount = params.amount;
+    const dstAmount = (parseFloat(srcAmount) * 0.98).toString(); // 2% slippage
+
+    return {
+      srcAmount,
+      dstAmount,
+      estimatedGas: "0.001", // ETH
+      route: ["ETH", "DOT"],
+      priceImpact: "2.0",
+      isCustomBridge: true,
+    };
+  }
+
+  /**
    * Create a new cross-chain swap order with proper secret management
    */
   async createSwapOrder(
@@ -109,6 +155,12 @@ export class FusionCrossChainSDK {
     fee?: { takingFeeBps: number; takingFeeReceiver: string }
   ): Promise<SwapOrder> {
     try {
+      // Handle custom bridge orders
+      if (quote.isCustomBridge) {
+        return await this.createCustomBridgeOrder(quote, walletAddress);
+      }
+
+      // Standard 1inch Fusion+ order
       const preset = quote.getPreset();
       const secretsCount = preset.secretsCount;
 
@@ -149,6 +201,39 @@ export class FusionCrossChainSDK {
       console.error("Error creating swap order:", error);
       throw error;
     }
+  }
+
+  /**
+   * Create custom bridge order for ETH ↔ DOT swaps
+   */
+  private async createCustomBridgeOrder(
+    quote: CustomBridgeQuote,
+    walletAddress: string
+  ): Promise<SwapOrder> {
+    // Generate a single secret for the HTLC
+    const secret = randomBytes(32).toString("hex");
+    const secretHash = ethers.keccak256(ethers.toUtf8Bytes(secret));
+
+    // Create a simple HashLock for single fill
+    const hashLock = HashLock.forSingleFill(secret);
+
+    // Generate order hash
+    const orderHash = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "string", "string", "uint256"],
+        [walletAddress, quote.srcAmount, quote.dstAmount, Date.now()]
+      )
+    );
+
+    return {
+      orderHash,
+      secrets: [secret],
+      secretHashes: [secretHash],
+      hashLock,
+      status: "created",
+      isCustomBridge: true,
+      timelock: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+    };
   }
 
   /**
@@ -263,7 +348,7 @@ export class FusionCrossChainSDK {
   }
 
   /**
-   * Create ETH → DOT swap
+   * Create ETH → DOT swap using custom bridge
    */
   async createEthToDotSwap(
     ethAmount: string,
@@ -280,11 +365,18 @@ export class FusionCrossChainSDK {
     };
 
     const quote = await this.getSwapQuote(params);
-    return this.createSwapOrder(quote, walletAddress);
+    const order = await this.createSwapOrder(quote, walletAddress);
+
+    // Add recipient information for custom bridge
+    if (order.isCustomBridge) {
+      (order as any).dotRecipient = dotRecipient;
+    }
+
+    return order;
   }
 
   /**
-   * Create DOT → ETH swap
+   * Create DOT → ETH swap using custom bridge
    */
   async createDotToEthSwap(
     dotAmount: string,
@@ -301,11 +393,19 @@ export class FusionCrossChainSDK {
     };
 
     const quote = await this.getSwapQuote(params);
-    return this.createSwapOrder(quote, walletAddress);
+    const order = await this.createSwapOrder(quote, walletAddress);
+
+    // Add recipient information for custom bridge
+    if (order.isCustomBridge) {
+      (order as any).ethRecipient = ethRecipient;
+    }
+
+    return order;
   }
 
   /**
    * Execute complete bidirectional swap workflow
+   * Updated to handle custom bridge swaps
    */
   async executeBidirectionalSwap(
     direction: "eth-to-dot" | "dot-to-eth",
@@ -334,7 +434,15 @@ export class FusionCrossChainSDK {
 
       console.log(`Created ${direction} swap order:`, order.orderHash);
 
-      // Step 2: Wait for escrow creation and finality
+      // For custom bridge orders, we handle the process differently
+      if (order.isCustomBridge) {
+        return {
+          order: { ...order, status: "ready" },
+          finalStatus: "ready_for_execution",
+        };
+      }
+
+      // Step 2: Wait for escrow creation and finality (standard 1inch process)
       let attempts = 0;
       const maxAttempts = 30; // 5 minutes with 10-second intervals
 
