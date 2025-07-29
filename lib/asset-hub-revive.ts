@@ -294,4 +294,185 @@ export class AssetHubReviveWrapper {
       return false;
     }
   }
+
+  async withdraw(account: KeyringPair, contractId: string, secret: string) {
+    console.log("💸 Creating Asset Hub Revive withdraw transaction...");
+    console.log(`   Contract ID: ${contractId}`);
+    console.log(`   Secret: ${secret.substring(0, 10)}...`);
+
+    try {
+      // Use the revive module for withdraw function
+      if (!this.api.tx.revive || !this.api.tx.revive.call) {
+        throw new Error("Revive module not available on this chain");
+      }
+
+      console.log("📝 Preparing revive withdraw call...");
+
+      // Function selector for withdraw: 0x2e1a7d4d
+      const functionSelector = "0x2e1a7d4d";
+
+      // Encode parameters for withdraw function:
+      // 1. contract_id: [u8; 32] (32 bytes)
+      // 2. secret: [u8; 32] (32 bytes)
+
+      const params = new Uint8Array(64); // 32 + 32 bytes
+      let offset = 0;
+
+      // 1. contract_id (32 bytes)
+      const contractIdBytes = new Uint8Array(
+        Buffer.from(contractId.slice(2), "hex")
+      );
+      params.set(contractIdBytes, offset);
+      offset += 32;
+
+      // 2. secret (32 bytes)
+      const secretBytes = new Uint8Array(Buffer.from(secret.slice(2), "hex"));
+      params.set(secretBytes, offset);
+
+      // Combine function selector with parameters
+      const callData = new Uint8Array(4 + params.length);
+      callData.set(
+        new Uint8Array(Buffer.from(functionSelector.slice(2), "hex")),
+        0
+      );
+      callData.set(params, 4);
+
+      console.log(`📝 Call data length: ${callData.length} bytes`);
+
+      // Create the revive call transaction with proper gas limit format
+      const tx = this.api.tx.revive.call(
+        this.contractAddress, // dest
+        0, // value (no DOT transfer needed for withdraw)
+        {
+          // gas_limit as Weight object
+          refTime: 1_000_000_000, // 1 billion ref time units
+          proofSize: 100_000, // 100KB proof size
+        },
+        null, // storage_deposit_limit
+        callData // data
+      );
+
+      console.log("📝 Transaction created, submitting...");
+
+      // Submit and wait for transaction result with proper promise handling
+      let unsubscribe: (() => void) | undefined;
+      let isCompleted = false;
+
+      const transactionPromise = new Promise<{
+        hash: string;
+        success: boolean;
+        blockHash?: string;
+        blockNumber?: number;
+      }>((resolve, reject) => {
+        tx.signAndSend(account, { nonce: -1 }, (result: ISubmittableResult) => {
+          const txHash = result.txHash.toHex();
+
+          console.log(`   📋 Transaction status: ${result.status.type}`);
+
+          if (result.status.isInBlock) {
+            console.log(`   📦 Included in block: ${result.status.asInBlock}`);
+
+            // Check for any failed events
+            const failedEvents = result.events.filter(({ event }) =>
+              this.api.events.system.ExtrinsicFailed.is(event)
+            );
+
+            if (failedEvents.length > 0) {
+              console.error(
+                "   ❌ Transaction failed with events:",
+                failedEvents
+              );
+              if (!isCompleted) {
+                isCompleted = true;
+                reject(new Error("Transaction failed during execution"));
+              }
+              return;
+            }
+
+            // Look for successful revive call events
+            const successEvents = result.events.filter(
+              ({ event }) =>
+                event.section === "revive" && event.method === "Called"
+            );
+
+            if (successEvents.length > 0) {
+              console.log("   ✅ Revive call successful");
+            }
+          } else if (result.status.isFinalized) {
+            console.log(
+              `   🎉 Transaction finalized in block: ${result.status.asFinalized}`
+            );
+
+            if (!isCompleted) {
+              isCompleted = true;
+              resolve({
+                hash: txHash,
+                success: true,
+                blockHash: result.status.asFinalized.toHex(),
+              });
+            }
+          }
+
+          // Log any events that occurred
+          result.events.forEach((event, index) => {
+            console.log(
+              `   Event ${index}: ${event.event.section}.${event.event.method}`
+            );
+          });
+        })
+          .then((unsub) => {
+            unsubscribe = unsub;
+          })
+          .catch((error) => {
+            if (!isCompleted) {
+              isCompleted = true;
+              reject(error);
+            }
+          });
+      });
+
+      // Wait for the transaction to be finalized
+      let result;
+      try {
+        result = await Promise.race([
+          transactionPromise,
+          new Promise<{
+            hash: string;
+            success: boolean;
+            blockHash?: string;
+            blockNumber?: number;
+          }>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Withdraw transaction timeout")),
+              30000
+            )
+          ),
+        ]);
+      } catch (error) {
+        console.error(
+          `   ❌ Failed to get withdraw transaction result: ${error}`
+        );
+        throw new Error("Could not confirm withdraw transaction in blockchain");
+      }
+
+      // Clean up the subscription
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+
+      console.log(`   ✅ Withdraw transaction hash: ${result.hash}`);
+
+      return {
+        success: true,
+        txHash: result.hash,
+        blockHash: result.blockHash || result.hash,
+      };
+    } catch (error) {
+      console.error("❌ Withdraw transaction failed:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 }

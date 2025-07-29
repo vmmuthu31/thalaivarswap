@@ -10,7 +10,9 @@
     "demo:complete": "npx ts-node --project tsconfig.node.json scripts/complete-cross-chain-demo.ts",
     "demo:eth-to-dot": "npx ts-node scripts/demo-eth-to-dot.ts",
     "demo:dot-to-eth": "npx ts-node scripts/demo-dot-to-eth.ts",
-    "deploy:contracts": "npx ts-node scripts/deploy-contracts.ts"
+    "deploy:contracts": "npx ts-node scripts/deploy-contracts.ts",
+    "test:fusion-auth": "npx ts-node --project tsconfig.node.json scripts/test-fusion-auth.ts",
+    "test:secret-submission": "npx ts-node --project tsconfig.node.json scripts/test-secret-submission.ts"
   },
   "dependencies": {
     "@1inch/cross-chain-sdk": "^0.2.1-rc.47",
