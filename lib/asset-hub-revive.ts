@@ -20,9 +20,7 @@ export class AssetHubReviveWrapper {
     swapId: string,
     sourceChain: number,
     destChain: number,
-    destAmount: string,
-    senderCrossAddress?: string,
-    receiverCrossAddress?: string
+    destAmount: string
   ) {
     console.log("📝 Creating Asset Hub Revive contract transaction...");
     console.log(`   Receiver: ${receiver}`);
@@ -54,7 +52,7 @@ export class AssetHubReviveWrapper {
       // Encode parameters for the 9-parameter function using proper SCALE encoding
       // This is a simplified approach - for production, use @polkadot/api-contract
 
-      // Parameter structure (9 parameters):
+      // Parameter structure (7 parameters):
       // 1. receiver: Address (H160 - 20 bytes)
       // 2. hashlock: [u8; 32] (32 bytes)
       // 3. timelock: BlockNumber (u32 - 4 bytes)
@@ -62,8 +60,6 @@ export class AssetHubReviveWrapper {
       // 5. source_chain: u32 (4 bytes)
       // 6. dest_chain: u32 (4 bytes)
       // 7. dest_amount: Balance (u128 - 16 bytes)
-      // 8. sender_cross_address: Option<Vec<u8>> (1 byte flag + length + data)
-      // 9. receiver_cross_address: Option<Vec<u8>> (1 byte flag + length + data)
 
       const params = new Uint8Array(1024); // Allocate enough space
       let offset = 0;
@@ -116,14 +112,6 @@ export class AssetHubReviveWrapper {
       params.set(destAmountBytes, offset);
       offset += 16;
 
-      // 8. sender_cross_address: Option<Vec<u8>> - encode as None (0x00)
-      params[offset] = 0x00; // None variant
-      offset += 1;
-
-      // 9. receiver_cross_address: Option<Vec<u8>> - encode as None (0x00)
-      params[offset] = 0x00; // None variant
-      offset += 1;
-
       // Create the full call data
       const encodedParams = params.slice(0, offset);
       const callData =
@@ -136,8 +124,8 @@ export class AssetHubReviveWrapper {
         this.contractAddress, // dest: contract address
         dotAmountInPlanck.toString(), // value: transfer DOT amount for HTLC
         {
-          refTime: "50000000000", // Higher gas limit ref time
-          proofSize: "500000", // Higher gas limit proof size
+          refTime: "10000000", // Lower gas limit ref time
+          proofSize: "10000", // Lower gas limit proof size
         },
         "1000000000000", // storage_deposit_limit: 1 DOT for storage
         callData // data: encoded function call
@@ -345,8 +333,8 @@ export class AssetHubReviveWrapper {
         0, // value (no DOT transfer needed for withdraw)
         {
           // gas_limit as Weight object
-          refTime: 1_000_000_000, // 1 billion ref time units
-          proofSize: 100_000, // 100KB proof size
+          refTime: 10_000_000, // Lower ref time units
+          proofSize: 10_000, // Lower proof size
         },
         null, // storage_deposit_limit
         callData // data

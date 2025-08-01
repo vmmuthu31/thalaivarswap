@@ -7,13 +7,18 @@ mod polkadotrelayer {
     use scale::{Encode, Decode};
     use scale_info::TypeInfo;
 
+    /// Type alias for Address using byte array (compatible with TypeInfo)
+    pub type Address = [u8; 32];
 
     /// Cross-chain address representation
     #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
     #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
     pub enum CrossChainAddress {
+        #[allow(clippy::cast_possible_truncation)]
         Ethereum([u8; 20]),
+        #[allow(clippy::cast_possible_truncation)]
         Substrate([u8; 32]),
+        #[allow(clippy::cast_possible_truncation)]
         Raw(Vec<u8>),
     }
 
@@ -22,7 +27,7 @@ mod polkadotrelayer {
         contracts: Mapping<[u8; 32], LockContract>,
         contract_counter: u64,
         admin: Address,
-        /// Use H160 as key for address mappings
+        /// Use Address as key for address mappings
         address_mappings: Mapping<Address, CrossChainAddress>,
         protocol_fee_bps: u16,
         protocol_fees: Balance,
@@ -30,7 +35,7 @@ mod polkadotrelayer {
         max_timelock: BlockNumber,
     }
 
-    /// Contract data with H160 addresses
+    /// Contract data with Address
     #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
     #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
     pub struct LockContract {
@@ -54,7 +59,6 @@ mod polkadotrelayer {
 
     #[ink(event)]
     pub struct AddressMapped {
-        #[ink(topic)]
         account: Address,
         cross_address: CrossChainAddress,
     }
@@ -63,9 +67,7 @@ mod polkadotrelayer {
     pub struct HTLCNew {
         #[ink(topic)]
         contract_id: [u8; 32],
-        #[ink(topic)]
         sender: Address,
-        #[ink(topic)]
         receiver: Address,
         amount: Balance,
         hashlock: [u8; 32],
@@ -80,7 +82,6 @@ mod polkadotrelayer {
     pub struct HTLCWithdraw {
         #[ink(topic)]
         contract_id: [u8; 32],
-        #[ink(topic)]
         secret: [u8; 32],
         relayer: Option<Address>,
     }
@@ -93,9 +94,7 @@ mod polkadotrelayer {
 
     #[ink(event)]
     pub struct RelayerRegistered {
-        #[ink(topic)]
         contract_id: [u8; 32],
-        #[ink(topic)]
         relayer: Address,
     }
 
@@ -119,6 +118,13 @@ mod polkadotrelayer {
         TimelockTooLong,
         Unauthorized,
         ConversionError,
+        Overflow,
+    }
+
+    impl Default for FusionHtlc {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl FusionHtlc {
@@ -127,7 +133,7 @@ mod polkadotrelayer {
             Self {
                 contracts: Mapping::default(),
                 contract_counter: 0,
-                admin: Self::env().caller(),
+                admin: Self::account_id_to_address(&Self::env().caller()),
                 address_mappings: Mapping::default(),
                 protocol_fee_bps: 30,
                 protocol_fees: 0,
@@ -136,10 +142,23 @@ mod polkadotrelayer {
             }
         }
 
+        /// Convert AccountId to Address (32-byte array)
+        fn account_id_to_address(account_id: &AccountId) -> Address {
+            let mut address = [0u8; 32];
+            let account_bytes = account_id.as_ref();
+            address.copy_from_slice(account_bytes);
+            address
+        }
+
+        /// Convert Address to AccountId
+        fn address_to_account_id(address: &Address) -> AccountId {
+            AccountId::from(*address)
+        }
+
         /// Map cross-chain address for account
         #[ink(message)]
         pub fn map_address(&mut self, cross_address: CrossChainAddress) -> Result<(), Error> {
-            let caller = self.env().caller();
+            let caller: Address = Self::account_id_to_address(&self.env().caller());
             self.address_mappings.insert(caller, &cross_address);
             
             self.env().emit_event(AddressMapped {
@@ -150,9 +169,10 @@ mod polkadotrelayer {
             Ok(())
         }
 
-        /// Create new HTLC contract with receiver as H160
+        /// Create new HTLC contract with receiver as Address
         #[ink(message)]
         #[ink(payable)]
+        #[allow(clippy::too_many_arguments)]
         pub fn new_contract(
             &mut self,
             receiver: Address,
@@ -165,12 +185,12 @@ mod polkadotrelayer {
             sender_cross_address: Option<Vec<u8>>,
             receiver_cross_address: Option<Vec<u8>>,
         ) -> Result<[u8; 32], Error> {
-            let sender = self.env().caller();
+            let sender: Address = Self::account_id_to_address(&self.env().caller());
             let amount = self.get_transferred_balance()?;
             
             self.validate_contract_params(timelock, source_chain, dest_chain)?;
             
-            let (net_amount, fee) = self.calculate_fees(amount);
+            let (net_amount, fee) = self.calculate_fees(amount)?;
             
             let contract_id = self.generate_contract_id(
                 &sender,
@@ -181,7 +201,7 @@ mod polkadotrelayer {
                 &swap_id,
             );
 
-            if self.contracts.contains(&contract_id) {
+            if self.contracts.get(contract_id).is_some() {
                 return Err(Error::ContractAlreadyExists);
             }
 
@@ -204,8 +224,8 @@ mod polkadotrelayer {
                 receiver_cross_address,
             };
 
-            self.contracts.insert(&contract_id, &contract);
-            self.protocol_fees += fee;
+            self.contracts.insert(contract_id, &contract);
+            self.protocol_fees = self.protocol_fees.checked_add(fee).ok_or(Error::Overflow)?;
             self.emit_htlc_new_event(&contract_id, &contract);
 
             Ok(contract_id)
@@ -213,7 +233,7 @@ mod polkadotrelayer {
 
         #[ink(message)]
         pub fn register_relayer(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
-            let caller = self.env().caller();
+            let caller: Address = Self::account_id_to_address(&self.env().caller());
             
             let mut contract = self.get_contract_or_error(&contract_id)?;
 
@@ -222,7 +242,7 @@ mod polkadotrelayer {
             }
 
             contract.relayer = Some(caller);
-            self.contracts.insert(&contract_id, &contract);
+            self.contracts.insert(contract_id, &contract);
 
             self.env().emit_event(RelayerRegistered {
                 contract_id,
@@ -238,7 +258,7 @@ mod polkadotrelayer {
             contract_id: [u8; 32],
             preimage: [u8; 32],
         ) -> Result<(), Error> {
-            let caller = self.env().caller();
+            let caller: Address = Self::account_id_to_address(&self.env().caller());
             
             let mut contract = self.validate_withdrawal_auth(&contract_id, &caller)?;
             self.validate_withdrawal_timing(&contract)?;
@@ -246,7 +266,7 @@ mod polkadotrelayer {
 
             contract.withdrawn = true;
             contract.preimage = Some(preimage);
-            self.contracts.insert(&contract_id, &contract);
+            self.contracts.insert(contract_id, &contract);
 
             self.execute_transfer(contract.receiver, contract.amount)?;
 
@@ -261,13 +281,13 @@ mod polkadotrelayer {
 
         #[ink(message)]
         pub fn refund(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
-            let caller = self.env().caller();
+            let caller: Address = Self::account_id_to_address(&self.env().caller());
             
             let mut contract = self.validate_refund_auth(&contract_id, &caller)?;
             self.validate_refund_timing(&contract)?;
 
             contract.refunded = true;
-            self.contracts.insert(&contract_id, &contract);
+            self.contracts.insert(contract_id, &contract);
 
             self.execute_transfer(contract.sender, contract.amount)?;
 
@@ -279,23 +299,23 @@ mod polkadotrelayer {
         // View functions
         #[ink(message)]
         pub fn get_contract(&self, contract_id: [u8; 32]) -> Option<LockContract> {
-            self.contracts.get(&contract_id)
+            self.contracts.get(contract_id)
         }
 
         #[ink(message)]
         pub fn contract_exists(&self, contract_id: [u8; 32]) -> bool {
-            self.contracts.contains(&contract_id)
+            self.contracts.get(contract_id).is_some()
         }
 
         #[ink(message)]
         pub fn get_secret(&self, contract_id: [u8; 32]) -> Option<[u8; 32]> {
-            self.contracts.get(&contract_id)
+            self.contracts.get(contract_id)
                 .and_then(|contract| contract.preimage)
         }
 
         #[ink(message)]
         pub fn get_cross_address(&self, account: Address) -> Option<CrossChainAddress> {
-            self.address_mappings.get(&account)
+            self.address_mappings.get(account)
         }
 
         #[ink(message)]
@@ -341,7 +361,7 @@ mod polkadotrelayer {
             }
 
             self.protocol_fees = 0;
-            if let Err(_) = self.execute_transfer(self.admin, fees) {
+            if self.execute_transfer(self.admin, fees).is_err() {
                 self.protocol_fees = fees; // Restore on failure
                 return Err(Error::TransferFailed);
             }
@@ -349,7 +369,7 @@ mod polkadotrelayer {
             Ok(())
         }
 
-        // Private helper functions - all under 25 lines, single responsibility
+        // Private helper functions
 
         /// Get transferred value as Balance, ensuring non-zero amount
         fn get_transferred_balance(&self) -> Result<Balance, Error> {
@@ -357,7 +377,9 @@ mod polkadotrelayer {
             if amount == 0u128.into() {
                 return Err(Error::InsufficientFunds);
             }
-            amount.try_into().map_err(|_| Error::ConversionError)
+            // Convert U256 to u128 (Balance)
+            let amount_u128: u128 = amount.try_into().map_err(|_| Error::ConversionError)?;
+            Ok(amount_u128)
         }
 
         /// Validate contract creation parameters
@@ -373,11 +395,13 @@ mod polkadotrelayer {
                 return Err(Error::InvalidTimelock);
             }
 
-            if timelock < current_block + self.min_timelock {
+            let min_lock = current_block.checked_add(self.min_timelock).ok_or(Error::Overflow)?;
+            if timelock < min_lock {
                 return Err(Error::TimelockTooShort);
             }
 
-            if timelock > current_block + self.max_timelock {
+            let max_lock = current_block.checked_add(self.max_timelock).ok_or(Error::Overflow)?;
+            if timelock > max_lock {
                 return Err(Error::TimelockTooLong);
             }
 
@@ -389,15 +413,20 @@ mod polkadotrelayer {
         }
 
         /// Calculate protocol fees from amount
-        fn calculate_fees(&self, amount: Balance) -> (Balance, Balance) {
-            let fee = (amount * self.protocol_fee_bps as u128) / 10000;
-            let net_amount = amount - fee;
-            (net_amount, fee)
+        fn calculate_fees(&self, amount: Balance) -> Result<(Balance, Balance), Error> {
+            let fee = amount
+                .checked_mul(self.protocol_fee_bps as u128)
+                .ok_or(Error::Overflow)?
+                .checked_div(10000)
+                .ok_or(Error::Overflow)?;
+
+            let net_amount = amount.checked_sub(fee).ok_or(Error::Overflow)?;
+            Ok((net_amount, fee))
         }
 
         /// Get contract by ID or return error
         fn get_contract_or_error(&self, contract_id: &[u8; 32]) -> Result<LockContract, Error> {
-            self.contracts.get(contract_id).ok_or(Error::ContractNotFound)
+            self.contracts.get(*contract_id).ok_or(Error::ContractNotFound)
         }
 
         /// Validate withdrawal authorization
@@ -469,16 +498,17 @@ mod polkadotrelayer {
             Ok(())
         }
 
-        /// Execute transfer with proper type conversion for ink! v6
+        /// Execute transfer for ink! v4.3.0
         fn execute_transfer(&self, to: Address, amount: Balance) -> Result<(), Error> {
-            let amount_u256: ink::primitives::U256 = amount.into();
-            self.env().transfer(to, amount_u256)
+            let account_id = Self::address_to_account_id(&to);
+            self.env().transfer(account_id, amount)
                 .map_err(|_| Error::TransferFailed)
         }
 
         /// Ensure caller is admin
         fn ensure_admin(&self) -> Result<(), Error> {
-            if self.env().caller() != self.admin {
+            let caller: Address = Self::account_id_to_address(&self.env().caller());
+            if caller != self.admin {
                 return Err(Error::Unauthorized);
             }
             Ok(())
@@ -501,6 +531,7 @@ mod polkadotrelayer {
         }
 
         /// Generate unique contract ID from parameters
+        #[allow(clippy::arithmetic_side_effects)]
         fn generate_contract_id(
             &mut self,
             sender: &Address,
@@ -552,12 +583,12 @@ mod polkadotrelayer {
             let htlc = FusionHtlc::new();
             
             // Test with 1000 units at 30 basis points (0.3%)
-            let (net_amount, fee) = htlc.calculate_fees(1000);
+            let (net_amount, fee) = htlc.calculate_fees(1000).unwrap();
             assert_eq!(fee, 3); // 1000 * 30 / 10000 = 3
             assert_eq!(net_amount, 997);
             
             // Test edge case with small amount
-            let (net_small, fee_small) = htlc.calculate_fees(100);
+            let (net_small, fee_small) = htlc.calculate_fees(100).unwrap();
             assert_eq!(fee_small, 0); // 100 * 30 / 10000 = 0.3 -> 0 (integer division)
             assert_eq!(net_small, 100);
         }

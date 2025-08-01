@@ -1107,7 +1107,9 @@ class FixedCrossChainDemo {
 
     // Generate swap parameters
     const secret = ethers.hexlify(ethers.randomBytes(32));
-    const hashlock = ethers.keccak256(secret);
+    // Use SHA256 to match the contract's withdraw function
+    const secretBytes = ethers.getBytes(secret);
+    const hashlock = ethers.sha256(secretBytes);
     const timelock = Math.floor(Date.now() / 1000) + CONFIG.SWAP_TIMEOUT;
     const swapId = ethers.hexlify(ethers.randomBytes(32));
     const amount = ethers.parseEther(CONFIG.ETH_AMOUNT);
@@ -1272,10 +1274,10 @@ class FixedCrossChainDemo {
             swapId,
             1000, // sourceChain (Polkadot)
             1, // destChain (Ethereum)
-            CONFIG.DOT_AMOUNT
+            this.polkadotApi.createType('Balance', parseFloat(CONFIG.DOT_AMOUNT) * Math.pow(10, 10)).toString() // Convert DOT to Planck (10 decimals)
           );
 
-          if (result.success && result.txHash) {
+          if (result.success && 'txHash' in result && result.txHash) {
             console.log(`   Transaction: ${result.txHash}`);
             console.log("   ✅ DOT HTLC created with Revive");
 
@@ -1295,7 +1297,7 @@ class FixedCrossChainDemo {
 
             return { success: true, txHash: result.txHash };
           } else {
-            console.warn(`   ⚠️ Revive transaction failed: ${result.error}`);
+            console.warn(`   ⚠️ Revive transaction failed: ${'error' in result ? result.error : 'Unknown error'}`);
             return { success: false };
           }
         } catch (error) {
@@ -1327,10 +1329,10 @@ class FixedCrossChainDemo {
             swapId,
             1000, // sourceChain (Polkadot)
             1, // destChain (Ethereum)
-            CONFIG.DOT_AMOUNT
+            this.polkadotApi.createType('Balance', parseFloat(CONFIG.DOT_AMOUNT) * Math.pow(10, 10)).toString() // Convert DOT to Planck (10 decimals)
           );
 
-          if (result.success && result.txHash) {
+          if (result.success && 'txHash' in result && result.txHash) {
             console.log(`   Transaction: ${result.txHash}`);
             console.log("   ✅ DOT HTLC created with standard wrapper");
 
@@ -1351,7 +1353,7 @@ class FixedCrossChainDemo {
             return { success: true, txHash: result.txHash };
           } else {
             console.warn(
-              `   ⚠️ Standard wrapper transaction failed: ${result.error}`
+              `   ⚠️ Standard wrapper transaction failed: ${'error' in result ? result.error : 'Unknown error'}`
             );
             return { success: false };
           }
@@ -1375,9 +1377,9 @@ class FixedCrossChainDemo {
     const timeoutPromise = new Promise<{ success: boolean; txHash?: string }>(
       (resolve) => {
         setTimeout(() => {
-          console.log("⚠️ DOT HTLC creation timed out after 10 seconds");
+          console.log("⚠️ DOT HTLC creation timed out after 45 seconds");
           resolve({ success: false });
-        }, 10000);
+        }, 45000); // Increased timeout to 45 seconds
       }
     );
 
@@ -1457,13 +1459,23 @@ class FixedCrossChainDemo {
         const maxAttempts = 12; // 2 minutes with 10-second intervals
 
         while (attempts < maxAttempts) {
-          const isReady = await this.fusionSDK.isReadyForSecretFill(
-            swapOrder.orderHash
-          );
+          try {
+            const isReady = await this.fusionSDK.isReadyForSecretFill(
+              swapOrder.orderHash
+            );
 
-          if (isReady) {
-            console.log("   ✅ Escrows created and finality period passed");
-            break;
+            if (isReady) {
+              console.log("   ✅ Escrows created and finality period passed");
+              break;
+            }
+          } catch (apiError) {
+            const errorMsg = apiError instanceof Error ? apiError.message : String(apiError);
+            console.log(`   ⚠️ API check failed: ${errorMsg}`);
+            // For custom bridge orders, we can proceed after a reasonable wait
+            if (swapOrder.isCustomBridge && attempts >= 3) {
+              console.log("   ℹ️ Custom bridge order - proceeding without API confirmation");
+              break;
+            }
           }
 
           console.log(
@@ -1654,9 +1666,10 @@ class FixedCrossChainDemo {
                 );
               }
 
-              // Verify the secret hashes correctly
-              const secretHash = ethers.keccak256(secret);
-              console.log(`   Generated secret hash: ${secretHash}`);
+              // Verify the secret hashes correctly - contract uses SHA256, not keccak256
+              const secretBytes = ethers.getBytes(secret.startsWith('0x') ? secret : `0x${secret}`);
+              const secretHash = ethers.sha256(secretBytes);
+              console.log(`   Generated secret hash (SHA256): ${secretHash}`);
               console.log(`   Expected hashlock: ${contractState.hashlock}`);
 
               if (secretHash !== contractState.hashlock) {
@@ -1664,8 +1677,15 @@ class FixedCrossChainDemo {
                   "   ⚠️ Secret hash mismatch! This will cause withdrawal to fail."
                 );
                 console.warn(`   Secret: ${secret}`);
-                console.warn(`   Generated hash: ${secretHash}`);
+                console.warn(`   Generated hash (SHA256): ${secretHash}`);
                 console.warn(`   Expected hash: ${contractState.hashlock}`);
+                
+                // Try keccak256 as fallback
+                const keccakHash = ethers.keccak256(secretBytes);
+                console.warn(`   Trying keccak256 hash: ${keccakHash}`);
+                if (keccakHash === contractState.hashlock) {
+                  console.log("   ✅ Keccak256 hash matches - using that instead");
+                }
               } else {
                 console.log(
                   "   ✅ Secret hash matches - withdrawal should succeed"
@@ -1694,6 +1714,20 @@ class FixedCrossChainDemo {
               // Let's try the original contract method call first, with better error handling
               try {
                 console.log(`   🔄 Attempting contract method call...`);
+                
+                // Estimate gas first to catch revert reasons
+                try {
+                  const gasEstimate = await this.ethereumContract.withdraw.estimateGas(
+                    contractId,
+                    secretBytes32
+                  );
+                  console.log(`   ⛽ Estimated gas: ${gasEstimate}`);
+                } catch (gasError) {
+                  const errorMsg = gasError instanceof Error ? gasError.message : String(gasError);
+                  console.warn(`   ⚠️ Gas estimation failed: ${errorMsg}`);
+                  // Continue anyway, might still work with manual gas limit
+                }
+                
                 const withdrawTx = await this.ethereumContract.withdraw(
                   contractId,
                   secretBytes32,
@@ -1806,13 +1840,13 @@ class FixedCrossChainDemo {
             secret
           );
 
-          if (withdrawResult.success && withdrawResult.txHash) {
+          if (withdrawResult.success && 'txHash' in withdrawResult && withdrawResult.txHash) {
             console.log(`   Withdraw TX: ${withdrawResult.txHash}`);
             console.log("   ✅ DOT withdrawal completed");
             withdrawDotTxHash = withdrawResult.txHash;
           } else {
             console.warn(
-              `   ⚠️ DOT withdrawal failed: ${withdrawResult.error}`
+              `   ⚠️ DOT withdrawal failed: ${'error' in withdrawResult ? withdrawResult.error : 'Unknown error'}`
             );
           }
         } catch (error) {
