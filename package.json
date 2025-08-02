@@ -16,7 +16,8 @@
     "deploy:dot-contract": "npx ts-node --project tsconfig.node.json scripts/deploy-dot-contract.ts",
     "test:fusion-auth": "npx ts-node --project tsconfig.node.json scripts/test-fusion-auth.ts",
     "test:secret-submission": "npx ts-node --project tsconfig.node.json scripts/test-secret-submission.ts",
-    "test:dot-contract": "npx ts-node --project tsconfig.node.json scripts/test-dot-contract-call.ts"
+    "test:dot-contract": "npx ts-node --project tsconfig.node.json scripts/test-dot-contract-call.ts",
+    "test:all-reads": "npx ts-node --project tsconfig.node.json scripts/test-all-read-functions.ts"
   },
   "dependencies": {
     "@1inch/cross-chain-sdk": "^0.2.1-rc.47",
