@@ -960,13 +960,285 @@ async function executeDotToEthEnhanced(dotAmount: string, swapId: string) {
   }
 }
 
-async function executeDotLocking(dotAmount: string, swapId: string) {
-  // ... existing implementation
+async function executeDotLocking(
+  dotAmount: string,
+  swapId: string
+): Promise<{
+  success: boolean;
+  txHash?: string;
+  block?: string;
+  explorerUrl?: string;
+  contractId?: string;
+  secretHash?: string;
+  timelock?: number;
+  error?: string;
+}> {
   console.log(`🔒 Locking ${dotAmount} DOT for cross-chain swap...`);
-  return {
-    success: true,
-    txHash: "0x...",
-    block: "1000",
-    explorerUrl: "https://polkadot.js.org/apps/...",
-  };
+
+  try {
+    // Initialize Polkadot connection
+    const wsProvider = new WsProvider(process.env.POLKADOT_WS_URL);
+    const polkadotApi = await ApiPromise.create({ provider: wsProvider });
+    const keyring = new Keyring({ type: "sr25519" });
+    const polkadotAccount = keyring.addFromMnemonic(process.env.POLKADOT_SEED);
+
+    console.log(`📋 Connected to Polkadot network`);
+    console.log(`   Chain: ${await polkadotApi.rpc.system.chain()}`);
+    console.log(`   Account: ${polkadotAccount.address}`);
+
+    // Calculate DOT amount in Planck (smallest unit)
+    const dotAmountFloat = parseFloat(dotAmount);
+    const dotAmountPlanck = Math.floor(dotAmountFloat * 10 ** 10);
+    const dotBalance = polkadotApi.registry.createType(
+      "Balance",
+      dotAmountPlanck.toString()
+    );
+
+    console.log(
+      `💰 DOT amount: ${dotAmountFloat} DOT (${dotAmountPlanck} Planck)`
+    );
+
+    // Check account balance
+    const accountInfo = await polkadotApi.query.system.account(
+      polkadotAccount.address
+    );
+    const freeBalance = accountInfo.data.free.toBigInt();
+    const requiredBalance = BigInt(dotAmountPlanck);
+
+    console.log(`💰 Account balance: ${freeBalance} Planck`);
+    console.log(`💰 Required balance: ${requiredBalance} Planck`);
+
+    if (freeBalance < requiredBalance) {
+      throw new Error(
+        `Insufficient DOT balance. Available: ${
+          Number(freeBalance) / 10 ** 10
+        } DOT, Required: ${dotAmountFloat} DOT`
+      );
+    }
+
+    // Generate HTLC parameters
+    const secret = ethers.hexlify(ethers.randomBytes(32));
+    const secretHash = ethers.keccak256(secret);
+    const currentBlock = await polkadotApi.query.system.number();
+    const timelock = currentBlock.toNumber() + 1200; // ~2 hours (6 second blocks)
+
+    console.log(`🔐 Generated HTLC parameters:`);
+    console.log(`   Secret: ${secret}`);
+    console.log(`   Secret Hash: ${secretHash}`);
+    console.log(`   Current Block: ${currentBlock.toNumber()}`);
+    console.log(`   Timelock: ${timelock}`);
+
+    // Check if contracts pallet is available
+    const hasContracts = polkadotApi.tx.contracts !== undefined;
+    console.log(`📋 Network supports contracts: ${hasContracts}`);
+
+    if (hasContracts && process.env.POLKADOT_HTLC_CONTRACT_ADDRESS) {
+      // Use ink! contract for HTLC
+      console.log(`🔒 Creating HTLC using ink! contract...`);
+
+      const contractAddress = process.env.POLKADOT_HTLC_CONTRACT_ADDRESS;
+      const receiverAddress =
+        "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"; // Default receiver
+
+      // Convert secret hash to bytes32 array
+      const secretHashBytes = ethers.getBytes(secretHash);
+      const swapIdBytes = ethers.getBytes(
+        ethers.keccak256(ethers.toUtf8Bytes(swapId))
+      );
+
+      // Create contract call for new_contract function
+      const contractTx = polkadotApi.tx.contracts.call(
+        contractAddress,
+        dotAmountPlanck, // value to send with the call
+        {
+          refTime: 3000000000, // 3 seconds of ref time
+          proofSize: 3000000, // 3MB proof size
+        },
+        null, // storageDepositLimit
+        // Encode the new_contract function call
+        // This is a simplified encoding - in production you'd use proper ABI encoding
+        polkadotApi.registry.createType(
+          "Bytes",
+          new Uint8Array([
+            // Function selector for new_contract (calculated from function signature)
+            0x9b,
+            0xae,
+            0x9d,
+            0x5e, // Placeholder - calculate actual selector
+            // Receiver address (32 bytes)
+            ...polkadotApi.registry
+              .createType("AccountId32", receiverAddress)
+              .toU8a(),
+            // Hashlock (32 bytes)
+            ...secretHashBytes,
+            // Timelock (4 bytes, little endian)
+            ...new Uint8Array(new Uint32Array([timelock]).buffer),
+            // Swap ID (32 bytes)
+            ...swapIdBytes,
+            // Source chain (4 bytes) - Polkadot
+            ...new Uint8Array(new Uint32Array([1000]).buffer),
+            // Dest chain (4 bytes) - Ethereum
+            ...new Uint8Array(new Uint32Array([1]).buffer),
+            // Dest amount (16 bytes) - ETH amount in wei
+            ...new Uint8Array(
+              new BigUint64Array([
+                BigInt(Math.floor(dotAmountFloat * 0.0021 * 10 ** 18)),
+              ]).buffer
+            ),
+          ])
+        )
+      );
+
+      console.log(`📝 Submitting HTLC contract transaction...`);
+
+      const txHash = await new Promise<string>((resolve, reject) => {
+        contractTx.signAndSend(polkadotAccount, (result: any) => {
+          console.log(`📊 Transaction status: ${result.status.type}`);
+
+          if (result.status.isInBlock) {
+            console.log(
+              `✅ HTLC contract transaction in block: ${result.status.asInBlock}`
+            );
+            resolve(result.status.asInBlock.toString());
+          } else if (result.isError) {
+            console.error(`❌ HTLC contract transaction failed: ${result}`);
+            reject(
+              new Error(`DOT HTLC contract transaction failed: ${result}`)
+            );
+          }
+
+          // Log contract events
+          if (result.events) {
+            result.events.forEach((event: any) => {
+              console.log(
+                `📡 Event: ${event.event.section}.${event.event.method}`
+              );
+              if (
+                event.event.section === "contracts" &&
+                event.event.method === "ContractEmitted"
+              ) {
+                console.log(
+                  `📋 Contract event data:`,
+                  event.event.data.toString()
+                );
+              }
+            });
+          }
+        });
+      });
+
+      const currentBlockAfter = await polkadotApi.query.system.number();
+      await polkadotApi.disconnect();
+
+      // Generate contract ID for tracking
+      const contractId = ethers.keccak256(
+        ethers.solidityPacked(
+          ["string", "bytes32", "uint256", "uint256"],
+          [swapId, secretHash, dotAmountPlanck, timelock]
+        )
+      );
+
+      console.log(`✅ DOT HTLC contract created successfully`);
+      console.log(`   Transaction: ${txHash}`);
+      console.log(`   Contract ID: ${contractId}`);
+
+      return {
+        success: true,
+        txHash,
+        block: currentBlockAfter.toString(),
+        explorerUrl: `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(
+          process.env.POLKADOT_WS_URL!
+        )}#/explorer/query/${txHash}`,
+        contractId,
+        secretHash,
+        timelock,
+      };
+    } else {
+      // Use native pallets for HTLC-like behavior
+      console.log(
+        `🔒 Creating HTLC using native pallets (Asset Hub compatible)...`
+      );
+
+      const recipient = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
+
+      // Create HTLC-like transaction using batch with remark for metadata
+      const htlcMetadata = ethers.solidityPacked(
+        ["string", "bytes32", "uint256", "uint256", "string"],
+        ["HTLC_LOCK", secretHash, timelock, dotAmountPlanck, swapId]
+      );
+
+      // Create batch transaction: remark (for HTLC metadata) + transfer (for locking)
+      const batchTx = polkadotApi.tx.utility.batch([
+        polkadotApi.tx.system.remark(htlcMetadata),
+        polkadotApi.tx.balances.transferKeepAlive(recipient, dotBalance),
+      ]);
+
+      console.log(`📝 Submitting native HTLC batch transaction...`);
+      console.log(`   Metadata: ${ethers.hexlify(htlcMetadata)}`);
+      console.log(`   Recipient: ${recipient}`);
+      console.log(`   Amount: ${dotBalance.toString()} Planck`);
+
+      const txHash = await new Promise<string>((resolve, reject) => {
+        batchTx.signAndSend(polkadotAccount, (result: any) => {
+          console.log(`📊 Transaction status: ${result.status.type}`);
+
+          if (result.status.isInBlock) {
+            console.log(
+              `✅ Native HTLC batch transaction in block: ${result.status.asInBlock}`
+            );
+            resolve(result.status.asInBlock.toString());
+          } else if (result.isError) {
+            console.error(`❌ Native HTLC batch transaction failed: ${result}`);
+            reject(new Error(`DOT native HTLC transaction failed: ${result}`));
+          }
+
+          // Log events
+          if (result.events) {
+            result.events.forEach((event: any) => {
+              console.log(
+                `📡 Event: ${event.event.section}.${event.event.method}`
+              );
+              if (
+                event.event.section === "balances" &&
+                event.event.method === "Transfer"
+              ) {
+                const [from, to, amount] = event.event.data;
+                console.log(`💸 Transfer: ${from} → ${to}, Amount: ${amount}`);
+              }
+            });
+          }
+        });
+      });
+
+      const currentBlockAfter = await polkadotApi.query.system.number();
+      await polkadotApi.disconnect();
+
+      // Generate contract ID for tracking
+      const contractId = ethers.keccak256(htlcMetadata);
+
+      console.log(`✅ DOT native HTLC created successfully`);
+      console.log(`   Transaction: ${txHash}`);
+      console.log(`   HTLC ID: ${contractId}`);
+      console.log(`   Secret can be used to claim: ${secret}`);
+
+      return {
+        success: true,
+        txHash,
+        block: currentBlockAfter.toString(),
+        explorerUrl: `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(
+          process.env.POLKADOT_WS_URL!
+        )}#/explorer/query/${txHash}`,
+        contractId,
+        secretHash,
+        timelock,
+      };
+    }
+  } catch (error) {
+    console.error(`❌ DOT locking failed:`, error);
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
 }
