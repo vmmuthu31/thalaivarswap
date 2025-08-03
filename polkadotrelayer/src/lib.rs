@@ -7,7 +7,6 @@ mod polkadotrelayer {
     use scale::{Encode, Decode};
     use scale_info::TypeInfo;
 
-
     /// Cross-chain address representation
     #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
     #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
@@ -17,39 +16,109 @@ mod polkadotrelayer {
         Raw(Vec<u8>),
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    pub struct PartialFillOrder {
+        pub maker: Address,
+        pub total_amount: Balance,
+        pub filled_amount: Balance,
+        pub min_fill_amount: Balance,
+        pub hashlock: [u8; 32],
+        pub timelock: BlockNumber,
+        pub cancelled: bool,
+        pub swap_id: [u8; 32],
+        pub source_chain: u32,
+        pub dest_chain: u32,
+        pub dest_amount_per_unit: Balance, // Destination amount per source unit (scaled by 1e12)
+        pub fee: Balance,
+        pub allow_partial_fills: bool,
+        pub max_fills: u32,
+        pub current_fills: u32,
+        pub sender_cross_address: Option<Vec<u8>>,
+        pub receiver_cross_address: Option<Vec<u8>>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
+    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
+    pub struct FillExecution {
+        pub order_id: [u8; 32],
+        pub taker: Address,
+        pub fill_amount: Balance,
+        pub contract_id: [u8; 32],
+        pub withdrawn: bool,
+        pub refunded: bool,
+        pub preimage: Option<[u8; 32]>,
+        pub timestamp: u64,
+    }
+
     #[ink(storage)]
-    pub struct FusionHtlc {
-        contracts: Mapping<[u8; 32], LockContract>,
-        contract_counter: u64,
+    pub struct PolkadotPartialFills {
+        orders: Mapping<[u8; 32], PartialFillOrder>,
+        fills: Mapping<[u8; 32], FillExecution>,
+        order_fills: Mapping<[u8; 32], Vec<[u8; 32]>>, // orderId => fillIds[]
         admin: Address,
-        /// Use H160 as key for address mappings
         address_mappings: Mapping<Address, CrossChainAddress>,
         protocol_fee_bps: u16,
         protocol_fees: Balance,
         min_timelock: BlockNumber,
         max_timelock: BlockNumber,
+        order_counter: u64,
+        fill_counter: u64,
     }
 
-    /// Contract data with H160 addresses
-    #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
-    #[cfg_attr(feature = "std", derive(ink::storage::traits::StorageLayout))]
-    pub struct LockContract {
-        pub sender: Address,
-        pub receiver: Address,
-        pub amount: Balance,
-        pub hashlock: [u8; 32],
-        pub timelock: BlockNumber,
-        pub withdrawn: bool,
-        pub refunded: bool,
-        pub preimage: Option<[u8; 32]>,
-        pub swap_id: [u8; 32],
-        pub source_chain: u32,
-        pub dest_chain: u32,
-        pub dest_amount: Balance,
-        pub fee: Balance,
-        pub relayer: Option<Address>,
-        pub sender_cross_address: Option<Vec<u8>>,
-        pub receiver_cross_address: Option<Vec<u8>>,
+    #[ink(event)]
+    pub struct PartialFillOrderCreated {
+        #[ink(topic)]
+        order_id: [u8; 32],
+        #[ink(topic)]
+        maker: Address,
+        total_amount: Balance,
+        min_fill_amount: Balance,
+        hashlock: [u8; 32],
+        timelock: BlockNumber,
+        swap_id: [u8; 32],
+        source_chain: u32,
+        dest_chain: u32,
+        dest_amount_per_unit: Balance,
+        allow_partial_fills: bool,
+        max_fills: u32,
+    }
+
+    #[ink(event)]
+    pub struct OrderFilled {
+        #[ink(topic)]
+        order_id: [u8; 32],
+        #[ink(topic)]
+        fill_id: [u8; 32],
+        #[ink(topic)]
+        taker: Address,
+        fill_amount: Balance,
+        dest_amount: Balance,
+        contract_id: [u8; 32],
+    }
+
+    #[ink(event)]
+    pub struct FillWithdrawn {
+        #[ink(topic)]
+        fill_id: [u8; 32],
+        #[ink(topic)]
+        secret: [u8; 32],
+        #[ink(topic)]
+        taker: Address,
+    }
+
+    #[ink(event)]
+    pub struct FillRefunded {
+        #[ink(topic)]
+        fill_id: [u8; 32],
+        #[ink(topic)]
+        maker: Address,
+    }
+
+    #[ink(event)]
+    pub struct OrderCancelled {
+        #[ink(topic)]
+        order_id: [u8; 32],
     }
 
     #[ink(event)]
@@ -59,52 +128,14 @@ mod polkadotrelayer {
         cross_address: CrossChainAddress,
     }
 
-    #[ink(event)]
-    pub struct HTLCNew {
-        #[ink(topic)]
-        contract_id: [u8; 32],
-        #[ink(topic)]
-        sender: Address,
-        #[ink(topic)]
-        receiver: Address,
-        amount: Balance,
-        hashlock: [u8; 32],
-        timelock: BlockNumber,
-        swap_id: [u8; 32],
-        source_chain: u32,
-        dest_chain: u32,
-        dest_amount: Balance,
-    }
-
-    #[ink(event)]
-    pub struct HTLCWithdraw {
-        #[ink(topic)]
-        contract_id: [u8; 32],
-        #[ink(topic)]
-        secret: [u8; 32],
-        relayer: Option<Address>,
-    }
-
-    #[ink(event)]
-    pub struct HTLCRefund {
-        #[ink(topic)]
-        contract_id: [u8; 32],
-    }
-
-    #[ink(event)]
-    pub struct RelayerRegistered {
-        #[ink(topic)]
-        contract_id: [u8; 32],
-        #[ink(topic)]
-        relayer: Address,
-    }
-
     #[derive(Debug, PartialEq, Eq, Encode, Decode, TypeInfo)]
     pub enum Error {
-        ContractAlreadyExists,
-        ContractNotFound,
+        OrderAlreadyExists,
+        OrderNotFound,
+        FillNotFound,
         InvalidTimelock,
         InsufficientFunds,
+        UnauthorizedFill,
         UnauthorizedWithdraw,
         UnauthorizedRefund,
         InvalidHashlock,
@@ -112,27 +143,35 @@ mod polkadotrelayer {
         TimelockNotExpired,
         TimelockExpired,
         TransferFailed,
-        InvalidFee,
         InvalidChainId,
-        RelayerAlreadySet,
-        TimelockTooShort,
-        TimelockTooLong,
+        InvalidFillAmount,
+        OrderCancelled,
+        OrderCompleted,
+        PartialFillsNotAllowed,
+        MaxFillsReached,
+        FillAmountTooSmall,
+        InvalidFee,
         Unauthorized,
         ConversionError,
+        TimelockTooShort,
+        TimelockTooLong,
     }
 
-    impl FusionHtlc {
+    impl PolkadotPartialFills {
         #[ink(constructor)]
         pub fn new() -> Self {
             Self {
-                contracts: Mapping::default(),
-                contract_counter: 0,
+                orders: Mapping::default(),
+                fills: Mapping::default(),
+                order_fills: Mapping::default(),
                 admin: Self::env().caller(),
                 address_mappings: Mapping::default(),
                 protocol_fee_bps: 30,
                 protocol_fees: 0,
                 min_timelock: 100,
                 max_timelock: 14400,
+                order_counter: 0,
+                fill_counter: 0,
             }
         }
 
@@ -150,147 +189,293 @@ mod polkadotrelayer {
             Ok(())
         }
 
-        /// Create new HTLC contract with receiver as H160
+        /// Create new partial fill order
         #[ink(message)]
         #[ink(payable)]
-        pub fn new_contract(
+        pub fn create_partial_fill_order(
             &mut self,
-            receiver: Address,
+            total_amount: Balance,
+            min_fill_amount: Balance,
             hashlock: [u8; 32],
             timelock: BlockNumber,
             swap_id: [u8; 32],
             source_chain: u32,
             dest_chain: u32,
-            dest_amount: Balance,
+            dest_amount_per_unit: Balance,
+            allow_partial_fills: bool,
+            max_fills: u32,
             sender_cross_address: Option<Vec<u8>>,
             receiver_cross_address: Option<Vec<u8>>,
         ) -> Result<[u8; 32], Error> {
-            let sender = self.env().caller();
-            let amount = self.get_transferred_balance()?;
+            let maker = self.env().caller();
+            let transferred_amount = self.get_transferred_balance()?;
             
-            self.validate_contract_params(timelock, source_chain, dest_chain)?;
+            self.validate_order_params(
+                total_amount,
+                min_fill_amount,
+                timelock,
+                source_chain,
+                dest_chain,
+                max_fills,
+            )?;
+
+            if transferred_amount < total_amount {
+                return Err(Error::InsufficientFunds);
+            }
+
+            let (net_amount, fee) = self.calculate_fees(total_amount);
             
-            let (net_amount, fee) = self.calculate_fees(amount);
-            
-            let contract_id = self.generate_contract_id(
-                &sender,
-                &receiver,
+            let order_id = self.generate_order_id(
+                &maker,
                 net_amount,
                 &hashlock,
                 timelock,
                 &swap_id,
             );
 
-            if self.contracts.contains(&contract_id) {
-                return Err(Error::ContractAlreadyExists);
+            if self.orders.contains(&order_id) {
+                return Err(Error::OrderAlreadyExists);
             }
 
-            let contract = LockContract {
-                sender,
-                receiver,
-                amount: net_amount,
+            let order = PartialFillOrder {
+                maker,
+                total_amount: net_amount,
+                filled_amount: 0,
+                min_fill_amount,
                 hashlock,
                 timelock,
-                withdrawn: false,
-                refunded: false,
-                preimage: None,
+                cancelled: false,
                 swap_id,
                 source_chain,
                 dest_chain,
-                dest_amount,
+                dest_amount_per_unit,
                 fee,
-                relayer: None,
+                allow_partial_fills,
+                max_fills,
+                current_fills: 0,
                 sender_cross_address,
                 receiver_cross_address,
             };
 
-            self.contracts.insert(&contract_id, &contract);
+            self.orders.insert(&order_id, &order);
             self.protocol_fees += fee;
-            self.emit_htlc_new_event(&contract_id, &contract);
 
-            Ok(contract_id)
-        }
-
-        #[ink(message)]
-        pub fn register_relayer(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
-            let caller = self.env().caller();
-            
-            let mut contract = self.get_contract_or_error(&contract_id)?;
-
-            if contract.relayer.is_some() {
-                return Err(Error::RelayerAlreadySet);
-            }
-
-            contract.relayer = Some(caller);
-            self.contracts.insert(&contract_id, &contract);
-
-            self.env().emit_event(RelayerRegistered {
-                contract_id,
-                relayer: caller,
+            self.env().emit_event(PartialFillOrderCreated {
+                order_id,
+                maker,
+                total_amount: net_amount,
+                min_fill_amount,
+                hashlock,
+                timelock,
+                swap_id,
+                source_chain,
+                dest_chain,
+                dest_amount_per_unit,
+                allow_partial_fills,
+                max_fills,
             });
 
-            Ok(())
+            Ok(order_id)
         }
 
+        /// Fill order (partial or full)
         #[ink(message)]
-        pub fn withdraw(
+        pub fn fill_order(
             &mut self,
-            contract_id: [u8; 32],
+            order_id: [u8; 32],
+            mut fill_amount: Balance,
+            receiver: Address,
+        ) -> Result<[u8; 32], Error> {
+            let taker = self.env().caller();
+            let mut order = self.get_order_or_error(&order_id)?;
+
+            self.validate_fill_request(&order, fill_amount)?;
+
+            let remaining_amount = order.total_amount - order.filled_amount;
+            if fill_amount > remaining_amount {
+                fill_amount = remaining_amount;
+            }
+
+            if fill_amount < order.min_fill_amount && remaining_amount > order.min_fill_amount {
+                return Err(Error::FillAmountTooSmall);
+            }
+
+            if !order.allow_partial_fills && fill_amount < remaining_amount {
+                return Err(Error::PartialFillsNotAllowed);
+            }
+
+            // Create fill execution
+            let fill_id = self.generate_fill_id(&order_id, &taker, fill_amount);
+            
+            if self.fills.contains(&fill_id) {
+                return Err(Error::OrderAlreadyExists);
+            }
+
+            let contract_id = self.generate_contract_id(&order_id, &fill_id);
+
+            let fill = FillExecution {
+                order_id,
+                taker,
+                fill_amount,
+                contract_id,
+                withdrawn: false,
+                refunded: false,
+                preimage: None,
+                timestamp: self.env().block_timestamp(),
+            };
+
+            self.fills.insert(&fill_id, &fill);
+
+            // Update order state
+            order.filled_amount += fill_amount;
+            order.current_fills += 1;
+            self.orders.insert(&order_id, &order);
+
+            // Add to order fills tracking
+            let mut order_fill_list = self.order_fills.get(&order_id).unwrap_or_default();
+            order_fill_list.push(fill_id);
+            self.order_fills.insert(&order_id, &order_fill_list);
+
+            let dest_amount = (fill_amount * order.dest_amount_per_unit) / 1_000_000_000_000; // Scale by 1e12
+
+            self.env().emit_event(OrderFilled {
+                order_id,
+                fill_id,
+                taker,
+                fill_amount,
+                dest_amount,
+                contract_id,
+            });
+
+            Ok(fill_id)
+        }
+
+        /// Withdraw filled amount using preimage
+        #[ink(message)]
+        pub fn withdraw_fill(
+            &mut self,
+            fill_id: [u8; 32],
             preimage: [u8; 32],
         ) -> Result<(), Error> {
             let caller = self.env().caller();
-            
-            let mut contract = self.validate_withdrawal_auth(&contract_id, &caller)?;
-            self.validate_withdrawal_timing(&contract)?;
-            self.validate_preimage(&contract, &preimage)?;
+            let mut fill = self.get_fill_or_error(&fill_id)?;
+            let order = self.get_order_or_error(&fill.order_id)?;
 
-            contract.withdrawn = true;
-            contract.preimage = Some(preimage);
-            self.contracts.insert(&contract_id, &contract);
+            self.validate_fill_withdrawal(&fill, &order, &caller)?;
+            self.validate_preimage(&order, &preimage)?;
 
-            self.execute_transfer(contract.receiver, contract.amount)?;
+            fill.withdrawn = true;
+            fill.preimage = Some(preimage);
+            self.fills.insert(&fill_id, &fill);
 
-            self.env().emit_event(HTLCWithdraw {
-                contract_id,
+            self.execute_transfer(fill.taker, fill.fill_amount)?;
+
+            self.env().emit_event(FillWithdrawn {
+                fill_id,
                 secret: preimage,
-                relayer: contract.relayer,
+                taker: fill.taker,
             });
 
             Ok(())
         }
 
+        /// Refund fill after timelock expires
         #[ink(message)]
-        pub fn refund(&mut self, contract_id: [u8; 32]) -> Result<(), Error> {
+        pub fn refund_fill(&mut self, fill_id: [u8; 32]) -> Result<(), Error> {
             let caller = self.env().caller();
-            
-            let mut contract = self.validate_refund_auth(&contract_id, &caller)?;
-            self.validate_refund_timing(&contract)?;
+            let mut fill = self.get_fill_or_error(&fill_id)?;
+            let mut order = self.get_order_or_error(&fill.order_id)?;
 
-            contract.refunded = true;
-            self.contracts.insert(&contract_id, &contract);
+            self.validate_fill_refund(&fill, &order, &caller)?;
 
-            self.execute_transfer(contract.sender, contract.amount)?;
+            fill.refunded = true;
+            self.fills.insert(&fill_id, &fill);
 
-            self.env().emit_event(HTLCRefund { contract_id });
+            // Update order filled amount (subtract refunded amount)
+            order.filled_amount -= fill.fill_amount;
+            order.current_fills -= 1;
+            self.orders.insert(&fill.order_id, &order);
+
+            self.execute_transfer(order.maker, fill.fill_amount)?;
+
+            self.env().emit_event(FillRefunded {
+                fill_id,
+                maker: order.maker,
+            });
+
+            Ok(())
+        }
+
+        /// Cancel order and refund remaining amount
+        #[ink(message)]
+        pub fn cancel_order(&mut self, order_id: [u8; 32]) -> Result<(), Error> {
+            let caller = self.env().caller();
+            let mut order = self.get_order_or_error(&order_id)?;
+
+            if caller != order.maker {
+                return Err(Error::UnauthorizedRefund);
+            }
+
+            if order.cancelled {
+                return Err(Error::OrderCancelled);
+            }
+
+            order.cancelled = true;
+            self.orders.insert(&order_id, &order);
+
+            let remaining_amount = order.total_amount - order.filled_amount;
+            if remaining_amount > 0 {
+                self.execute_transfer(order.maker, remaining_amount)?;
+            }
+
+            self.env().emit_event(OrderCancelled { order_id });
 
             Ok(())
         }
 
         // View functions
         #[ink(message)]
-        pub fn get_contract(&self, contract_id: [u8; 32]) -> Option<LockContract> {
-            self.contracts.get(&contract_id)
+        pub fn get_order(&self, order_id: [u8; 32]) -> Option<PartialFillOrder> {
+            self.orders.get(&order_id)
         }
 
         #[ink(message)]
-        pub fn contract_exists(&self, contract_id: [u8; 32]) -> bool {
-            self.contracts.contains(&contract_id)
+        pub fn get_fill(&self, fill_id: [u8; 32]) -> Option<FillExecution> {
+            self.fills.get(&fill_id)
         }
 
         #[ink(message)]
-        pub fn get_secret(&self, contract_id: [u8; 32]) -> Option<[u8; 32]> {
-            self.contracts.get(&contract_id)
-                .and_then(|contract| contract.preimage)
+        pub fn get_order_fills(&self, order_id: [u8; 32]) -> Vec<[u8; 32]> {
+            self.order_fills.get(&order_id).unwrap_or_default()
+        }
+
+        #[ink(message)]
+        pub fn order_exists(&self, order_id: [u8; 32]) -> bool {
+            self.orders.contains(&order_id)
+        }
+
+        #[ink(message)]
+        pub fn get_remaining_amount(&self, order_id: [u8; 32]) -> Balance {
+            if let Some(order) = self.orders.get(&order_id) {
+                if order.cancelled || order.filled_amount >= order.total_amount {
+                    return 0;
+                }
+                return order.total_amount - order.filled_amount;
+            }
+            0
+        }
+
+        #[ink(message)]
+        pub fn is_order_complete(&self, order_id: [u8; 32]) -> bool {
+            if let Some(order) = self.orders.get(&order_id) {
+                return order.filled_amount >= order.total_amount;
+            }
+            false
+        }
+
+        #[ink(message)]
+        pub fn get_fill_secret(&self, fill_id: [u8; 32]) -> Option<[u8; 32]> {
+            self.fills.get(&fill_id).and_then(|fill| fill.preimage)
         }
 
         #[ink(message)]
@@ -349,9 +534,7 @@ mod polkadotrelayer {
             Ok(())
         }
 
-        // Private helper functions - all under 25 lines, single responsibility
-
-        /// Get transferred value as Balance, ensuring non-zero amount
+        // Private helper functions
         fn get_transferred_balance(&self) -> Result<Balance, Error> {
             let amount = self.env().transferred_value();
             if amount == 0u128.into() {
@@ -360,12 +543,14 @@ mod polkadotrelayer {
             amount.try_into().map_err(|_| Error::ConversionError)
         }
 
-        /// Validate contract creation parameters
-        fn validate_contract_params(
+        fn validate_order_params(
             &self,
+            total_amount: Balance,
+            min_fill_amount: Balance,
             timelock: BlockNumber,
             source_chain: u32,
             dest_chain: u32,
+            max_fills: u32,
         ) -> Result<(), Error> {
             let current_block = self.env().block_number();
 
@@ -385,98 +570,122 @@ mod polkadotrelayer {
                 return Err(Error::InvalidChainId);
             }
 
+            if min_fill_amount == 0 || min_fill_amount > total_amount {
+                return Err(Error::InvalidFillAmount);
+            }
+
+            if max_fills == 0 {
+                return Err(Error::InvalidFillAmount);
+            }
+
             Ok(())
         }
 
-        /// Calculate protocol fees from amount
+        fn validate_fill_request(
+            &self,
+            order: &PartialFillOrder,
+            fill_amount: Balance,
+        ) -> Result<(), Error> {
+            if order.cancelled {
+                return Err(Error::OrderCancelled);
+            }
+
+            let current_block = self.env().block_number();
+            if current_block >= order.timelock {
+                return Err(Error::TimelockExpired);
+            }
+
+            if order.filled_amount >= order.total_amount {
+                return Err(Error::OrderCompleted);
+            }
+
+            if order.current_fills >= order.max_fills {
+                return Err(Error::MaxFillsReached);
+            }
+
+            if fill_amount == 0 {
+                return Err(Error::InvalidFillAmount);
+            }
+
+            Ok(())
+        }
+
+        fn validate_fill_withdrawal(
+            &self,
+            fill: &FillExecution,
+            order: &PartialFillOrder,
+            caller: &Address,
+        ) -> Result<(), Error> {
+            if *caller != fill.taker {
+                return Err(Error::UnauthorizedWithdraw);
+            }
+
+            if fill.withdrawn || fill.refunded {
+                return Err(Error::AlreadyProcessed);
+            }
+
+            let current_block = self.env().block_number();
+            if current_block >= order.timelock {
+                return Err(Error::TimelockExpired);
+            }
+
+            Ok(())
+        }
+
+        fn validate_fill_refund(
+            &self,
+            fill: &FillExecution,
+            order: &PartialFillOrder,
+            caller: &Address,
+        ) -> Result<(), Error> {
+            if *caller != order.maker {
+                return Err(Error::UnauthorizedRefund);
+            }
+
+            if fill.withdrawn || fill.refunded {
+                return Err(Error::AlreadyProcessed);
+            }
+
+            let current_block = self.env().block_number();
+            if current_block < order.timelock {
+                return Err(Error::TimelockNotExpired);
+            }
+
+            Ok(())
+        }
+
+        fn validate_preimage(
+            &self,
+            order: &PartialFillOrder,
+            preimage: &[u8; 32],
+        ) -> Result<(), Error> {
+            let hash = self.compute_sha256(preimage);
+            if hash != order.hashlock {
+                return Err(Error::InvalidHashlock);
+            }
+            Ok(())
+        }
+
         fn calculate_fees(&self, amount: Balance) -> (Balance, Balance) {
             let fee = (amount * self.protocol_fee_bps as u128) / 10000;
             let net_amount = amount - fee;
             (net_amount, fee)
         }
 
-        /// Get contract by ID or return error
-        fn get_contract_or_error(&self, contract_id: &[u8; 32]) -> Result<LockContract, Error> {
-            self.contracts.get(contract_id).ok_or(Error::ContractNotFound)
+        fn get_order_or_error(&self, order_id: &[u8; 32]) -> Result<PartialFillOrder, Error> {
+            self.orders.get(order_id).ok_or(Error::OrderNotFound)
         }
 
-        /// Validate withdrawal authorization
-        fn validate_withdrawal_auth(
-            &self,
-            contract_id: &[u8; 32],
-            caller: &Address,
-        ) -> Result<LockContract, Error> {
-            let contract = self.get_contract_or_error(contract_id)?;
-
-            if contract.receiver != *caller && contract.relayer.as_ref() != Some(caller) {
-                return Err(Error::UnauthorizedWithdraw);
-            }
-
-            if contract.withdrawn || contract.refunded {
-                return Err(Error::AlreadyProcessed);
-            }
-
-            Ok(contract)
+        fn get_fill_or_error(&self, fill_id: &[u8; 32]) -> Result<FillExecution, Error> {
+            self.fills.get(fill_id).ok_or(Error::FillNotFound)
         }
 
-        /// Validate withdrawal timing (before timelock expires)
-        fn validate_withdrawal_timing(&self, contract: &LockContract) -> Result<(), Error> {
-            let current_block = self.env().block_number();
-            if current_block >= contract.timelock {
-                return Err(Error::TimelockExpired);
-            }
-            Ok(())
-        }
-
-        /// Validate refund authorization
-        fn validate_refund_auth(
-            &self,
-            contract_id: &[u8; 32],
-            caller: &Address,
-        ) -> Result<LockContract, Error> {
-            let contract = self.get_contract_or_error(contract_id)?;
-
-            if contract.sender != *caller {
-                return Err(Error::UnauthorizedRefund);
-            }
-
-            if contract.withdrawn || contract.refunded {
-                return Err(Error::AlreadyProcessed);
-            }
-
-            Ok(contract)
-        }
-
-        /// Validate refund timing (after timelock expires)
-        fn validate_refund_timing(&self, contract: &LockContract) -> Result<(), Error> {
-            let current_block = self.env().block_number();
-            if current_block < contract.timelock {
-                return Err(Error::TimelockNotExpired);
-            }
-            Ok(())
-        }
-
-        /// Validate preimage matches hashlock
-        fn validate_preimage(
-            &self,
-            contract: &LockContract,
-            preimage: &[u8; 32],
-        ) -> Result<(), Error> {
-            let hash = self.compute_sha256(preimage);
-            if hash != contract.hashlock {
-                return Err(Error::InvalidHashlock);
-            }
-            Ok(())
-        }
-
-        /// Execute transfer with proper type conversion for ink! v6
         fn execute_transfer(&self, to: Address, amount: Balance) -> Result<(), Error> {
             let amount_u256: ink::primitives::U256 = amount.into();
             self.env().transfer(to, amount_u256)
                 .map_err(|_| Error::TransferFailed)
         }
 
-        /// Ensure caller is admin
         fn ensure_admin(&self) -> Result<(), Error> {
             if self.env().caller() != self.admin {
                 return Err(Error::Unauthorized);
@@ -484,47 +693,55 @@ mod polkadotrelayer {
             Ok(())
         }
 
-        /// Emit HTLC creation event
-        fn emit_htlc_new_event(&self, contract_id: &[u8; 32], contract: &LockContract) {
-            self.env().emit_event(HTLCNew {
-                contract_id: *contract_id,
-                sender: contract.sender,
-                receiver: contract.receiver,
-                amount: contract.amount,
-                hashlock: contract.hashlock,
-                timelock: contract.timelock,
-                swap_id: contract.swap_id,
-                source_chain: contract.source_chain,
-                dest_chain: contract.dest_chain,
-                dest_amount: contract.dest_amount,
-            });
-        }
-
-        /// Generate unique contract ID from parameters
-        fn generate_contract_id(
+        fn generate_order_id(
             &mut self,
-            sender: &Address,
-            receiver: &Address,
+            maker: &Address,
             amount: Balance,
             hashlock: &[u8; 32],
             timelock: BlockNumber,
             swap_id: &[u8; 32],
         ) -> [u8; 32] {
-            self.contract_counter += 1;
+            self.order_counter += 1;
             
             let mut data = Vec::new();
-            data.extend_from_slice(&sender.encode());
-            data.extend_from_slice(&receiver.encode());
+            data.extend_from_slice(&maker.encode());
             data.extend_from_slice(&amount.to_le_bytes());
             data.extend_from_slice(hashlock);
             data.extend_from_slice(&timelock.to_le_bytes());
             data.extend_from_slice(swap_id);
-            data.extend_from_slice(&self.contract_counter.to_le_bytes());
+            data.extend_from_slice(&self.order_counter.to_le_bytes());
 
             self.compute_sha256(&data)
         }
 
-        /// Compute SHA256 hash
+        fn generate_fill_id(
+            &self,
+            order_id: &[u8; 32],
+            taker: &Address,
+            fill_amount: Balance,
+        ) -> [u8; 32] {
+            let mut data = Vec::new();
+            data.extend_from_slice(order_id);
+            data.extend_from_slice(&taker.encode());
+            data.extend_from_slice(&fill_amount.to_le_bytes());
+            data.extend_from_slice(&self.env().block_timestamp().to_le_bytes());
+            data.extend_from_slice(&self.env().block_number().to_le_bytes());
+
+            self.compute_sha256(&data)
+        }
+
+        fn generate_contract_id(&mut self, order_id: &[u8; 32], fill_id: &[u8; 32]) -> [u8; 32] {
+            self.fill_counter += 1;
+            
+            let mut data = Vec::new();
+            data.extend_from_slice(order_id);
+            data.extend_from_slice(fill_id);
+            data.extend_from_slice(&self.env().block_timestamp().to_le_bytes());
+            data.extend_from_slice(&self.fill_counter.to_le_bytes());
+
+            self.compute_sha256(&data)
+        }
+
         fn compute_sha256(&self, data: &[u8]) -> [u8; 32] {
             use ink::env::hash::{Sha2x256, HashOutput};
             let mut output = <Sha2x256 as HashOutput>::Type::default();
@@ -540,123 +757,143 @@ mod polkadotrelayer {
         type TestEnv = ink::env::DefaultEnvironment;
 
         #[ink::test]
-        fn test_constructor_initializes_correctly() {
-            let htlc = FusionHtlc::new();
-            assert_eq!(htlc.get_protocol_fee_bps(), 30);
-            assert_eq!(htlc.get_protocol_fees(), 0);
-            assert_eq!(htlc.contract_counter, 0);
-        }
-
-        #[ink::test]
-        fn test_fee_calculation_accuracy() {
-            let htlc = FusionHtlc::new();
-            
-            // Test with 1000 units at 30 basis points (0.3%)
-            let (net_amount, fee) = htlc.calculate_fees(1000);
-            assert_eq!(fee, 3); // 1000 * 30 / 10000 = 3
-            assert_eq!(net_amount, 997);
-            
-            // Test edge case with small amount
-            let (net_small, fee_small) = htlc.calculate_fees(100);
-            assert_eq!(fee_small, 0); // 100 * 30 / 10000 = 0.3 -> 0 (integer division)
-            assert_eq!(net_small, 100);
-        }
-
-        #[ink::test]
-        fn test_address_mapping_functionality() {
-            let mut htlc = FusionHtlc::new();
+        fn test_partial_fill_order_creation() {
+            let mut contract = PolkadotPartialFills::new();
             let accounts = ink::env::test::default_accounts::<TestEnv>();
             
-            ink::env::test::set_caller::<TestEnv>(accounts.alice);
-            
-            let eth_address = CrossChainAddress::Ethereum([0x42; 20]);
-            let result = htlc.map_address(eth_address.clone());
-            assert!(result.is_ok());
-            
-            let mapped = htlc.get_cross_address(accounts.alice);
-            assert_eq!(mapped, Some(eth_address));
-        }
-
-        #[ink::test]
-        fn test_contract_creation_success() {
-            let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts::<TestEnv>();
-            
-            // Setup test environment
             ink::env::test::set_caller::<TestEnv>(accounts.alice);
             ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
             ink::env::test::set_block_number::<TestEnv>(100);
 
-            let result = htlc.new_contract(
-                accounts.bob,        // receiver
-                [0x01; 32],         // hashlock
-                500,                // timelock (400 blocks from now)
-                [0x02; 32],         // swap_id
-                1,                  // source_chain (Ethereum)
-                2,                  // dest_chain (Polkadot)
-                900,                // dest_amount
-                Some(vec![0xaa, 0xbb, 0xcc]),  // sender_cross_address
-                Some(vec![0xdd, 0xee, 0xff])   // receiver_cross_address
+            let result = contract.create_partial_fill_order(
+                1000,                    // total_amount
+                100,                     // min_fill_amount
+                [0x01; 32],             // hashlock
+                500,                     // timelock
+                [0x02; 32],             // swap_id
+                1,                       // source_chain
+                2,                       // dest_chain
+                1_000_000_000_000,      // dest_amount_per_unit (1:1 ratio scaled)
+                true,                    // allow_partial_fills
+                5,                       // max_fills
+                None,                    // sender_cross_address
+                None,                    // receiver_cross_address
             );
 
             assert!(result.is_ok());
             
-            let contract_id = result.unwrap();
-            assert!(htlc.contract_exists(contract_id));
+            let order_id = result.unwrap();
+            assert!(contract.order_exists(order_id));
             
-            let contract = htlc.get_contract(contract_id).unwrap();
-            assert_eq!(contract.sender, accounts.alice);
-            assert_eq!(contract.receiver, accounts.bob);
-            assert_eq!(contract.amount, 997); // 1000 - 3 (fee)
-            assert_eq!(contract.source_chain, 1);
-            assert_eq!(contract.dest_chain, 2);
-            assert!(!contract.withdrawn);
-            assert!(!contract.refunded);
+            let order = contract.get_order(order_id).unwrap();
+            assert_eq!(order.maker, accounts.alice);
+            assert_eq!(order.total_amount, 997); // 1000 - 3 (fee)
+            assert_eq!(order.filled_amount, 0);
+            assert_eq!(order.min_fill_amount, 100);
+            assert!(order.allow_partial_fills);
+            assert_eq!(order.max_fills, 5);
+            assert_eq!(order.current_fills, 0);
         }
 
         #[ink::test]
-        fn test_timelock_validation() {
-            let mut htlc = FusionHtlc::new();
+        fn test_partial_fill_execution() {
+            let mut contract = PolkadotPartialFills::new();
             let accounts = ink::env::test::default_accounts::<TestEnv>();
             
+            // Create order
             ink::env::test::set_caller::<TestEnv>(accounts.alice);
             ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
             ink::env::test::set_block_number::<TestEnv>(100);
 
-            // Test timelock too short
-            let result = htlc.new_contract(
-                accounts.bob, [0x01; 32], 150, [0x02; 32], 1, 2, 900, None, None
-            );
-            assert_eq!(result.err(), Some(Error::TimelockTooShort));
-
-            // Test timelock too long
-            let result = htlc.new_contract(
-                accounts.bob, [0x01; 32], 20000, [0x02; 32], 1, 2, 900, None, None
-            );
-            assert_eq!(result.err(), Some(Error::TimelockTooLong));
-        }
-
-        #[ink::test]
-        fn test_relayer_registration() {
-            let mut htlc = FusionHtlc::new();
-            let accounts = ink::env::test::default_accounts::<TestEnv>();
-            
-            // Create contract first
-            ink::env::test::set_caller::<TestEnv>(accounts.alice);
-            ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
-            ink::env::test::set_block_number::<TestEnv>(100);
-
-            let contract_id = htlc.new_contract(
-                accounts.bob, [0x01; 32], 500, [0x02; 32], 1, 2, 900, None, None
+            let order_id = contract.create_partial_fill_order(
+                1000, 100, [0x01; 32], 500, [0x02; 32], 1, 2, 
+                1_000_000_000_000, true, 5, None, None
             ).unwrap();
 
-            // Register relayer
-            ink::env::test::set_caller::<TestEnv>(accounts.charlie);
-            let result = htlc.register_relayer(contract_id);
-            assert!(result.is_ok());
+            // Fill order partially
+            ink::env::test::set_caller::<TestEnv>(accounts.bob);
+            let fill_result = contract.fill_order(order_id, 200, accounts.charlie);
+            assert!(fill_result.is_ok());
 
-            let contract = htlc.get_contract(contract_id).unwrap();
-            assert_eq!(contract.relayer, Some(accounts.charlie));
+            let fill_id = fill_result.unwrap();
+            let fill = contract.get_fill(fill_id).unwrap();
+            assert_eq!(fill.taker, accounts.bob);
+            assert_eq!(fill.fill_amount, 200);
+            assert!(!fill.withdrawn);
+            assert!(!fill.refunded);
+
+            // Check order state
+            let order = contract.get_order(order_id).unwrap();
+            assert_eq!(order.filled_amount, 200);
+            assert_eq!(order.current_fills, 1);
+            assert_eq!(contract.get_remaining_amount(order_id), 797); // 997 - 200
+        }
+
+        #[ink::test]
+        fn test_multiple_partial_fills() {
+            let mut contract = PolkadotPartialFills::new();
+            let accounts = ink::env::test::default_accounts::<TestEnv>();
+            
+            // Create order
+            ink::env::test::set_caller::<TestEnv>(accounts.alice);
+            ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
+            ink::env::test::set_block_number::<TestEnv>(100);
+
+            let order_id = contract.create_partial_fill_order(
+                1000, 100, [0x01; 32], 500, [0x02; 32], 1, 2, 
+                1_000_000_000_000, true, 3, None, None
+            ).unwrap();
+
+            // First fill
+            ink::env::test::set_caller::<TestEnv>(accounts.bob);
+            let fill1_id = contract.fill_order(order_id, 200, accounts.charlie).unwrap();
+
+            // Second fill
+            ink::env::test::set_caller::<TestEnv>(accounts.charlie);
+            let fill2_id = contract.fill_order(order_id, 300, accounts.bob).unwrap();
+
+            // Check order state
+            let order = contract.get_order(order_id).unwrap();
+            assert_eq!(order.filled_amount, 500); // 200 + 300
+            assert_eq!(order.current_fills, 2);
+            assert_eq!(contract.get_remaining_amount(order_id), 497); // 997 - 500
+
+            // Check fills tracking
+            let order_fills = contract.get_order_fills(order_id);
+            assert_eq!(order_fills.len(), 2);
+            assert!(order_fills.contains(&fill1_id));
+            assert!(order_fills.contains(&fill2_id));
+        }
+
+        #[ink::test]
+        fn test_fill_withdrawal_with_secret() {
+            let mut contract = PolkadotPartialFills::new();
+            let accounts = ink::env::test::default_accounts::<TestEnv>();
+            
+            // Create order
+            ink::env::test::set_caller::<TestEnv>(accounts.alice);
+            ink::env::test::set_value_transferred::<TestEnv>(1000u128.into());
+            ink::env::test::set_block_number::<TestEnv>(100);
+
+            let secret = [0x42; 32];
+            let hashlock = contract.compute_sha256(&secret);
+
+            let order_id = contract.create_partial_fill_order(
+                1000, 100, hashlock, 500, [0x02; 32], 1, 2, 
+                1_000_000_000_000, true, 5, None, None
+            ).unwrap();
+
+            // Fill order
+            ink::env::test::set_caller::<TestEnv>(accounts.bob);
+            let fill_id = contract.fill_order(order_id, 200, accounts.charlie).unwrap();
+
+            // Withdraw with correct secret
+            let withdraw_result = contract.withdraw_fill(fill_id, secret);
+            assert!(withdraw_result.is_ok());
+
+            let fill = contract.get_fill(fill_id).unwrap();
+            assert!(fill.withdrawn);
+            assert_eq!(fill.preimage, Some(secret));
         }
     }
 }
