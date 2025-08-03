@@ -1,14 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
+import { promises as fs } from "fs";
+import path from "path";
 
-// Mock database for demo - in production use Firebase/PostgreSQL
-const swapDatabase = new Map<string, any>();
+// Persistent storage file path
+const STORAGE_FILE = path.join(process.cwd(), "data", "swaps.json");
+
+// Ensure data directory exists
+async function ensureDataDirectory() {
+  const dataDir = path.dirname(STORAGE_FILE);
+  try {
+    await fs.access(dataDir);
+  } catch {
+    await fs.mkdir(dataDir, { recursive: true });
+  }
+}
+
+// Load swaps from persistent storage
+async function loadSwaps(): Promise<Map<string, any>> {
+  try {
+    await ensureDataDirectory();
+    const data = await fs.readFile(STORAGE_FILE, "utf-8");
+    const swapsArray = JSON.parse(data);
+    return new Map(swapsArray);
+  } catch (error) {
+    // File doesn't exist or is invalid, return empty map
+    return new Map();
+  }
+}
+
+// Save swaps to persistent storage
+async function saveSwaps(swapDatabase: Map<string, any>) {
+  try {
+    await ensureDataDirectory();
+    const swapsArray = Array.from(swapDatabase.entries());
+    await fs.writeFile(STORAGE_FILE, JSON.stringify(swapsArray, null, 2));
+  } catch (error) {
+    console.error("Failed to save swaps to storage:", error);
+  }
+}
+
+// Initialize with persistent data
+let swapDatabase: Map<string, any> | null = null;
+
+async function getSwapDatabase(): Promise<Map<string, any>> {
+  if (!swapDatabase) {
+    swapDatabase = await loadSwaps();
+  }
+  return swapDatabase;
+}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const action = searchParams.get("action");
     const swapId = searchParams.get("swapId");
+    
+    const swapDatabase = await getSwapDatabase();
 
     if (action === "status" && swapId) {
       // Get specific swap status
@@ -21,6 +69,7 @@ export async function GET(request: NextRequest) {
       // Check real transaction status
       const updatedSwap = await checkTransactionStatus(swap);
       swapDatabase.set(swapId, updatedSwap);
+      await saveSwaps(swapDatabase);
 
       return NextResponse.json({
         success: true,
@@ -58,6 +107,8 @@ export async function GET(request: NextRequest) {
       const totalVolume = allSwaps
         .filter((s) => s.status === "completed")
         .reduce((sum, s) => sum + parseFloat(s.amount || "0"), 0);
+
+      console.log(`📊 Stats requested - Total swaps: ${totalSwaps}, Completed: ${completedSwaps}`);
 
       return NextResponse.json({
         success: true,
@@ -105,6 +156,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const swapDatabase = await getSwapDatabase();
+
     // Process and normalize the swap data
     const swap = {
       ...swapData,
@@ -141,6 +194,7 @@ export async function POST(request: NextRequest) {
     }
 
     swapDatabase.set(swapId, swap);
+    await saveSwaps(swapDatabase);
 
     console.log(`📊 Stored swap in monitor: ${swapId} - ${swap.status}`);
 

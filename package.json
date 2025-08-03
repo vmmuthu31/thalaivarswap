@@ -28,7 +28,10 @@
     "fusion:quote": "curl 'http://localhost:3000/api/fusion/quote?amount=0.001'",
     "fusion:orders": "curl 'http://localhost:3000/api/fusion/orders?type=active'",
     "swaps:list": "curl http://localhost:3000/api/swaps",
-    "demo:complete": "npm run relayer:start && sleep 2 && npm run test:eth-to-dot && sleep 10 && npm run swaps:list"
+    "demo:complete": "npm run relayer:start && sleep 2 && npm run test:eth-to-dot && sleep 10 && npm run swaps:list",
+    "test:add-sample-data": "node scripts/add-test-swaps.js",
+    "dashboard:reset": "rm -f data/swaps.json && echo 'Dashboard data reset'",
+    "dashboard:populate": "node scripts/add-test-swaps.js && echo 'Dashboard populated with test data'"
   },
   "dependencies": {
     "@1inch/cross-chain-sdk": "^0.1.15",
