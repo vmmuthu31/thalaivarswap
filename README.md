@@ -14,48 +14,33 @@ A comprehensive bidirectional cross-chain swap system enabling secure ETH ↔ DO
 - **🧪 Demo Ready**: Complete end-to-end demonstration capabilities
 - **🌐 Multi-testnet Support**: Deployed on Ethereum Sepolia and Polkadot Paseo
 
-## 🏗️ Implementation Architecture
+### Architecture Diagrams
 
-### System Overview
+#### System Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           ThalaivarSwap Protocol                                │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │
-│  │   Ethereum      │    │  Bidirectional  │    │   Polkadot      │             │
-│  │   (Sepolia)     │◄──►│    Relayer      │◄──►│   (Paseo)      │             │
-│  │                 │    │                 │    │                 │             │
-│  │ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │             │
-│  │ │ EVM HTLC    │ │    │ │ Dutch       │ │    │ │ ink! HTLC   │ │             │
-│  │ │ Contract    │ │    │ │ Auction     │ │    │ │ Contract    │ │             │
-│  │ │             │ │    │ │ Engine      │ │    │ │             │ │             │
-│  │ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │             │
-│  │                 │    │                 │    │                 │             │
-│  │ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │             │
-│  │ │ Event       │ │    │ │ Secret      │ │    │ │ Event       │ │             │
-│  │ │ Listener    │ │    │ │ Coordinator │ │    │ │ Listener    │ │             │
-│  │ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │             │
-│  └─────────────────┘    └─────────────────┘    └─────────────────┘             │
-│                                   │                                             │
-│  ┌─────────────────────────────────▼─────────────────────────────────┐         │
-│  │                    Monitoring & Analytics Layer                    │         │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐  │         │
-│  │  │ Block Sync  │ │ HTLC Status │ │ Swap Metrics│ │ Health      │  │         │
-│  │  │ Monitor     │ │ Tracker     │ │ Collector   │ │ Monitor     │  │         │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘  │         │
-│  └─────────────────────────────────────────────────────────────────────┘         │
-│                                                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐         │
-│  │                        1inch Fusion+ Integration                   │         │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐  │         │
-│  │  │ Custom      │ │ Order       │ │ Quote       │ │ Secret      │  │         │
-│  │  │ Bridge SDK  │ │ Management  │ │ Generation  │ │ Management  │  │         │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘  │         │
-│  └─────────────────────────────────────────────────────────────────────┘         │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![System Architecture Flow](./public/SystemArchitectureFlow.png)
+_Complete system architecture showing the interaction between Ethereum, Polkadot, and the ThalaivarSwap protocol components_
+
+#### Implementation Flow
+
+![Implementation Flow](./public/ImplementationFlow.png)
+_Detailed implementation flow showing the step-by-step process of cross-chain swap execution_
+
+#### Complete Swap Execution Flow
+
+![Complete Swap Execution Flow](./public/CompleteSwapExecutionFlow.png)
+_Comprehensive flow diagram illustrating the complete swap execution process with error handling and recovery mechanisms_
+
+#### Architecture Highlights
+
+The ThalaivarSwap protocol implements a sophisticated cross-chain architecture with the following key components:
+
+- **🔗 Cross-Chain Bridge**: Seamless ETH ↔ DOT swaps using HTLC technology
+- **🏛️ Dutch Auction System**: Competitive resolver participation with dynamic pricing
+- **🔐 Atomic Security**: Hash Time Locked Contracts ensuring atomic execution
+- **📊 Real-time Monitoring**: Comprehensive system monitoring and analytics
+- **⚡ Event-driven Design**: Real-time event processing across both chains
+- **🛡️ Production Security**: Multi-layer security with automatic recovery mechanisms
 
 ### Core Components
 
@@ -415,27 +400,27 @@ The following screenshots demonstrate the complete bidirectional swap functional
 
 **1. ETH Deposit Confirmation**
 ![ETH Deposited](./public/ethdeposited.png)
-*ETH successfully deposited into the HTLC contract on Ethereum Sepolia testnet*
+_ETH successfully deposited into the HTLC contract on Ethereum Sepolia testnet_
 
 **2. ETH to DOT Swap Execution**
 ![ETH to DOT Swap](./public/eth-dot.png)
-*Cross-chain swap from ETH to DOT showing the atomic transaction execution*
+_Cross-chain swap from ETH to DOT showing the atomic transaction execution_
 
 ### DOT → ETH Swap Flow
 
 **3. DOT Deposit Confirmation**
 ![DOT Deposited](./public/dotdeposited.png)
-*DOT successfully deposited into the HTLC contract on Polkadot Paseo testnet*
+_DOT successfully deposited into the HTLC contract on Polkadot Paseo testnet_
 
 **4. DOT to ETH Swap Execution**
 ![DOT to ETH Swap](./public/dot-eth.png)
-*Cross-chain swap from DOT to ETH demonstrating bidirectional functionality*
+_Cross-chain swap from DOT to ETH demonstrating bidirectional functionality_
 
 ### Complete Swap Results
 
 **5. Final Swap Completion**
 ![Swap Result](./public/swapresult.png)
-*Successful completion of the cross-chain swap with final balances and transaction confirmations*
+_Successful completion of the cross-chain swap with final balances and transaction confirmations_
 
 ### Key Achievements Demonstrated
 
