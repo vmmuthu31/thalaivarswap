@@ -44,6 +44,19 @@ _Cross-chain swap from DOT to ETH demonstrating bidirectional functionality_
 ![Swap Result](./public/swapresult.png)
 _Successful completion of the cross-chain swap with final balances and transaction confirmations_
 
+## 🎥 Demo Video
+
+[![ThalaivarSwap Demo](https://img.shields.io/badge/▶️-Watch%20Demo-red?style=for-the-badge&logo=youtube)](https://drive.google.com/file/d/1X2_2_i6dpPCvvqUTD5N4wtlDC5SgF3hX/view?usp=sharing)
+
+> **Note**: If the video doesn't load, try [this direct link](https://drive.google.com/file/d/1X2_2_i6dpPCvvqUTD5N4wtlDC5SgF3hX/view?usp=sharing)
+
+### What the demo shows:
+- ✅ Complete ETH → DOT atomic swap execution
+- ✅ HTLC creation and fund locking on both chains
+- ✅ Cross-chain secret coordination and settlement
+- ✅ Real transaction confirmations on Ethereum and Polkadot
+- ✅ Trustless, atomic execution without intermediaries
+
 ### Architecture Diagrams
 
 #### System Architecture Overview
