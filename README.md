@@ -449,7 +449,7 @@ The following screenshots demonstrate the complete bidirectional swap functional
 ### Programmatic Usage
 
 ```typescript
-import { CrossChainRelayer } from "./lib/bidirectional-relayer";
+import { CrossChainRelayer } from "./lib/cross-chain-relayer";
 import { FusionCrossChainSDK } from "./lib/fusion-sdk";
 
 // Initialize relayer
