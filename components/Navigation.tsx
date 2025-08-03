@@ -1,31 +1,31 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { ArrowLeftRight, BarChart3, Home, Zap } from 'lucide-react';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { ArrowLeftRight, BarChart3, Home, Zap } from "lucide-react";
 
 export default function Navigation() {
   const pathname = usePathname();
 
   const navItems = [
     {
-      href: '/',
-      label: 'Home',
+      href: "/",
+      label: "Home",
       icon: Home,
-      description: 'Welcome to ThalaivarSwap'
+      description: "Welcome to ThalaivarSwap",
     },
     {
-      href: '/swap',
-      label: 'Swap',
+      href: "/swap",
+      label: "Swap",
       icon: ArrowLeftRight,
-      description: 'Execute cross-chain swaps'
+      description: "Execute cross-chain swaps",
     },
-    {
-      href: '/dashboard',
-      label: 'Dashboard',
-      icon: BarChart3,
-      description: 'Monitor swap activity'
-    }
+    // {
+    //   href: '/dashboard',
+    //   label: 'Dashboard',
+    //   icon: BarChart3,
+    //   description: 'Monitor swap activity'
+    // }
   ];
 
   return (
@@ -43,15 +43,15 @@ export default function Navigation() {
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
-              
+
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
                     isActive
-                      ? 'bg-white/20 text-white'
-                      : 'text-gray-300 hover:text-white hover:bg-white/10'
+                      ? "bg-white/20 text-white"
+                      : "text-gray-300 hover:text-white hover:bg-white/10"
                   }`}
                   title={item.description}
                 >
