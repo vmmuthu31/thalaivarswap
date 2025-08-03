@@ -59,7 +59,7 @@ A comprehensive bidirectional cross-chain swap system enabling secure ETH ↔ DO
 
 ### Core Components
 
-#### 1. **Bidirectional Relayer** (`lib/bidirectional-relayer.ts`)
+#### 1. **Cross-Chain Relayer** (`lib/cross-chain-relayer.ts`)
 
 The heart of the system that orchestrates cross-chain operations.
 
@@ -406,6 +406,45 @@ npm run demo:eth-to-dot
 # DOT → ETH swap demo
 npm run demo:dot-to-eth
 ```
+
+## 📸 Demo Results
+
+The following screenshots demonstrate the complete bidirectional swap functionality:
+
+### ETH → DOT Swap Flow
+
+**1. ETH Deposit Confirmation**
+![ETH Deposited](./public/ethdeposited.png)
+*ETH successfully deposited into the HTLC contract on Ethereum Sepolia testnet*
+
+**2. ETH to DOT Swap Execution**
+![ETH to DOT Swap](./public/eth-dot.png)
+*Cross-chain swap from ETH to DOT showing the atomic transaction execution*
+
+### DOT → ETH Swap Flow
+
+**3. DOT Deposit Confirmation**
+![DOT Deposited](./public/dotdeposited.png)
+*DOT successfully deposited into the HTLC contract on Polkadot Paseo testnet*
+
+**4. DOT to ETH Swap Execution**
+![DOT to ETH Swap](./public/dot-eth.png)
+*Cross-chain swap from DOT to ETH demonstrating bidirectional functionality*
+
+### Complete Swap Results
+
+**5. Final Swap Completion**
+![Swap Result](./public/swapresult.png)
+*Successful completion of the cross-chain swap with final balances and transaction confirmations*
+
+### Key Achievements Demonstrated
+
+✅ **Atomic Cross-Chain Swaps**: Both ETH→DOT and DOT→ETH swaps completed atomically  
+✅ **HTLC Security**: Hash Time Locked Contracts working correctly on both chains  
+✅ **Secret Coordination**: Proper secret revelation enabling atomic completion  
+✅ **Bidirectional Functionality**: Full support for swaps in both directions  
+✅ **Real-time Monitoring**: Live tracking of swap progress and completion  
+✅ **Production Ready**: Deployed and tested on Sepolia and Paseo testnets
 
 ### Programmatic Usage
 
