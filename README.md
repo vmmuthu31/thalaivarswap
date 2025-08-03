@@ -14,6 +14,36 @@ A comprehensive bidirectional cross-chain swap system enabling secure ETH ↔ DO
 - **🧪 Demo Ready**: Complete end-to-end demonstration capabilities
 - **🌐 Multi-testnet Support**: Deployed on Ethereum Sepolia and Polkadot Paseo
 
+## 📸 Demo Results
+
+The following screenshots demonstrate the complete bidirectional swap functionality:
+
+### ETH → DOT Swap Flow
+
+**1. ETH Deposit Confirmation**
+![ETH Deposited](./public/ethdeposited.png)
+_ETH successfully deposited into the HTLC contract on Ethereum Sepolia testnet_
+
+**2. ETH to DOT Swap Execution**
+![ETH to DOT Swap](./public/eth-dot.png)
+_Cross-chain swap from ETH to DOT showing the atomic transaction execution_
+
+### DOT → ETH Swap Flow
+
+**3. DOT Deposit Confirmation**
+![DOT Deposited](./public/dotdeposited.png)
+_DOT successfully deposited into the HTLC contract on Polkadot Paseo testnet_
+
+**4. DOT to ETH Swap Execution**
+![DOT to ETH Swap](./public/dot-eth.png)
+_Cross-chain swap from DOT to ETH demonstrating bidirectional functionality_
+
+### Complete Swap Results
+
+**5. Final Swap Completion**
+![Swap Result](./public/swapresult.png)
+_Successful completion of the cross-chain swap with final balances and transaction confirmations_
+
 ### Architecture Diagrams
 
 #### System Architecture Overview
@@ -392,36 +422,6 @@ npm run demo:eth-to-dot
 npm run demo:dot-to-eth
 ```
 
-## 📸 Demo Results
-
-The following screenshots demonstrate the complete bidirectional swap functionality:
-
-### ETH → DOT Swap Flow
-
-**1. ETH Deposit Confirmation**
-![ETH Deposited](./public/ethdeposited.png)
-_ETH successfully deposited into the HTLC contract on Ethereum Sepolia testnet_
-
-**2. ETH to DOT Swap Execution**
-![ETH to DOT Swap](./public/eth-dot.png)
-_Cross-chain swap from ETH to DOT showing the atomic transaction execution_
-
-### DOT → ETH Swap Flow
-
-**3. DOT Deposit Confirmation**
-![DOT Deposited](./public/dotdeposited.png)
-_DOT successfully deposited into the HTLC contract on Polkadot Paseo testnet_
-
-**4. DOT to ETH Swap Execution**
-![DOT to ETH Swap](./public/dot-eth.png)
-_Cross-chain swap from DOT to ETH demonstrating bidirectional functionality_
-
-### Complete Swap Results
-
-**5. Final Swap Completion**
-![Swap Result](./public/swapresult.png)
-_Successful completion of the cross-chain swap with final balances and transaction confirmations_
-
 ### Key Achievements Demonstrated
 
 ✅ **Atomic Cross-Chain Swaps**: Both ETH→DOT and DOT→ETH swaps completed atomically  
@@ -555,26 +555,6 @@ relayer.on("metrics-update", (metrics) => {
 - `createSwapOrder(quote, wallet, fee)` - Create swap order
 - `monitorOrderStatus(orderHash)` - Monitor order status
 
-## 🏆 Production Features
-
-### ✅ Implemented
-
-- **Bidirectional ETH ↔ DOT swaps** with atomic execution
-- **Dutch auction mechanism** with competitive resolver participation
-- **Custom 1inch Fusion+ integration** for Polkadot support
-- **Complete Polkadot event parsing** and processing
-- **Secret coordination** between Ethereum and Polkadot HTLCs
-- **Comprehensive monitoring system** with real-time analytics
-- **End-to-end demo scripts** for testing and demonstration
-- **Production-grade error handling** and recovery mechanisms
-
-### 🔄 Next Steps
-
-- **Contract deployment** to Sepolia and Paseo testnets
-- **Integration test suite** for automated testing
-- **Performance optimization** and gas cost reduction
-- **UI/UX interface** for user-friendly interactions
-
 ## 📊 Performance Metrics
 
 **Typical Swap Times:**
@@ -594,18 +574,6 @@ relayer.on("metrics-update", (metrics) => {
 - HTLC status: Every 10 seconds
 - Health checks: Every 15 seconds
 - Metrics collection: Every 30 seconds
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement changes with tests
-4. Update documentation
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
