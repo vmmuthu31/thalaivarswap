@@ -20,12 +20,12 @@ export default function Navigation() {
       icon: ArrowLeftRight,
       description: "Execute cross-chain swaps",
     },
-    // {
-    //   href: '/dashboard',
-    //   label: 'Dashboard',
-    //   icon: BarChart3,
-    //   description: 'Monitor swap activity'
-    // }
+    {
+      href: "/dashboard",
+      label: "Dashboard",
+      icon: BarChart3,
+      description: "Monitor swap activity",
+    },
   ];
 
   return (
